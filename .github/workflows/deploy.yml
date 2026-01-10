@@ -15,6 +15,13 @@ jobs:
     - name: Install PM2
       run: npm install pm2 -g
 
+    - name: Connect to Tailscale
+      uses: tailscale/github-action@v4
+      with:
+        oauth-client-id: ${{ secrets.TS_OAUTH_CLIENT_ID }}
+        oauth-secret: ${{ secrets.TS_OAUTH_SECRET }}
+        tags: tag:ci
+
     - name: Deploy to RP5
       uses: appleboy/ssh-action@v0.1.7
       with:
@@ -22,6 +29,7 @@ jobs:
         username: ${{ secrets.USERNAME }}
         password: ${{ secrets.PASSWORD }}
         port: ${{ secrets.PORT }}
+        command_timeout: 10m
         script: |
           cd /home/randan/projects/light-tg-bot
           git pull origin master
