@@ -1,12 +1,17 @@
 import formatTime from './formatTime';
-import checkIPFormat from './checkIPFormat';
+import { logger } from './logger';
 import {
   adminId,
   appPort,
   dbLightCollection,
+  dbLightHistoryCollection,
   dbMongooseUri,
+  env,
   localDbName,
-  passphrase,
+  socketId,
+  tuyaAccessKey,
+  tuyaBaseUrl,
+  tuyaSecretKey,
 } from './envVars';
 
 export {
@@ -14,8 +19,15 @@ export {
   appPort,
   formatTime,
   dbLightCollection,
+  dbLightHistoryCollection,
   dbMongooseUri,
+  env,
   localDbName,
-  checkIPFormat,
-  passphrase,
+  socketId,
+  tuyaAccessKey,
+  logger,
+  tuyaSecretKey,
+  tuyaBaseUrl,
 };
+
+export { sendErrorToAdmin, setupGlobalErrorHandlers } from './errorHandler';

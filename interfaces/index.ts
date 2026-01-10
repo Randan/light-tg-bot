@@ -1,6 +1,10 @@
 export interface ILightRecord {
   status: boolean;
-  lastTimestamp: string;
   userIds: number[];
-  ipToPing: string;
+  deviceId: string;
+}
+
+export interface ILightHistory {
+  timestamp: Date;
+  status: boolean;
 }

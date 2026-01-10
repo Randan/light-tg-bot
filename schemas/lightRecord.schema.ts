@@ -4,10 +4,12 @@ import { ILightRecord } from '../interfaces';
 
 const lightRecordSchema = new Schema<ILightRecord>({
   status: Boolean,
-  lastTimestamp: String,
   userIds: [Number],
-  ipToPing: { type: String, unique: true },
+  deviceId: { type: String, unique: true },
 });
+
+// Create index for faster queries
+lightRecordSchema.index({ deviceId: 1 });
 
 const LightRecords = mongoose.model(dbLightCollection, lightRecordSchema);
 

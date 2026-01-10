@@ -1,29 +1,51 @@
 import { Message } from 'node-telegram-bot-api';
 import bot from '../bot';
-import { addUser, getIPsList, help, removeUser } from '../controllers';
+import { checkStatus, getStatistics, help } from '../controllers';
 
 const events: Record<string, RegExp> = {
   help: /\/help/,
-  add: /\/add/,
-  remove: /\/remove/,
-  list: /\/list/,
+  status: /\/status/,
+  statsDay: /\/stats_day/,
+  statsWeek: /\/stats_week/,
+  statsMonth: /\/stats_month/,
+  statsHalfyear: /\/stats_halfyear/,
+  statsYear: /\/stats_year/,
+  statsAll: /\/stats_all/,
 };
 
 bot.onText(events.help, (msg: Message): void => help(msg));
 
 bot.onText(
-  events.add,
-  async (msg: Message): Promise<void> =>
-    addUser(msg.from?.id || 0, msg.text?.split(' ')[1] || '')
+  events.status,
+  async (msg: Message): Promise<void> => checkStatus(msg.from?.id || 0)
 );
 
 bot.onText(
-  events.remove,
-  async (msg: Message): Promise<void> =>
-    removeUser(msg.from?.id || 0, msg.text?.split(' ')[1])
+  events.statsDay,
+  async (msg: Message): Promise<void> => getStatistics(msg.from?.id || 0, 'day')
 );
 
 bot.onText(
-  events.list,
-  async (msg: Message): Promise<void> => getIPsList(msg.from?.id || 0)
+  events.statsWeek,
+  async (msg: Message): Promise<void> => getStatistics(msg.from?.id || 0, 'week')
+);
+
+bot.onText(
+  events.statsMonth,
+  async (msg: Message): Promise<void> => getStatistics(msg.from?.id || 0, 'month')
+);
+
+bot.onText(
+  events.statsHalfyear,
+  async (msg: Message): Promise<void> => getStatistics(msg.from?.id || 0, 'halfyear')
+);
+
+bot.onText(
+  events.statsYear,
+  async (msg: Message): Promise<void> => getStatistics(msg.from?.id || 0, 'year')
+);
+
+bot.onText(
+  events.statsAll,
+  async (msg: Message): Promise<void> => getStatistics(msg.from?.id || 0, 'all')
 );

@@ -28,4 +28,7 @@ jobs:
           export NVM_DIR=~/.nvm
           source ~/.nvm/nvm.sh
           npm install
-          pm2 restart light-tg-bot
+          npm run build
+          pm2 delete light-tg-bot 2>/dev/null || true
+          pm2 start npm --name "light-tg-bot" -- start
+          pm2 save
