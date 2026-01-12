@@ -14,6 +14,47 @@ setupGlobalErrorHandlers();
 
 const app: Express = express();
 
+// MongoDB reconnection logic
+let reconnectAttempts = 0;
+const maxReconnectDelay = 30000; // 30 seconds max delay
+let reconnectTimeout: NodeJS.Timeout | null = null;
+
+const reconnectToMongoDB = async (): Promise<void> => {
+  // Clear any existing reconnect timeout
+  if (reconnectTimeout) {
+    clearTimeout(reconnectTimeout);
+    reconnectTimeout = null;
+  }
+
+  // If already connected, don't reconnect
+  if (mongoose.connection.readyState === 1) {
+    reconnectAttempts = 0;
+    return;
+  }
+
+  // Calculate exponential backoff delay (capped at maxReconnectDelay)
+  const delay = Math.min(1000 * Math.pow(2, reconnectAttempts), maxReconnectDelay);
+  reconnectAttempts += 1;
+
+  logger.warn(`⏳ Attempting to reconnect to MongoDB in ${delay}ms (attempt ${reconnectAttempts})...`);
+
+  reconnectTimeout = setTimeout(async () => {
+    try {
+      await mongoose.connect(dbMongooseUri);
+      logger.log('✅ Successfully reconnected to MongoDB');
+      reconnectAttempts = 0;
+    } catch (err) {
+      logger.error('❌ Failed to reconnect to MongoDB:', err);
+      await sendErrorToAdmin(err as Error, {
+        location: 'index.ts - reconnectToMongoDB',
+        additionalInfo: `Reconnection attempt ${reconnectAttempts} failed`,
+      });
+      // Try again
+      reconnectToMongoDB();
+    }
+  }, delay);
+};
+
 // Connect to MongoDB and wait for connection
 mongoose.connect(dbMongooseUri).catch(err => {
   logger.error('Failed to connect to MongoDB:', err);
@@ -21,11 +62,14 @@ mongoose.connect(dbMongooseUri).catch(err => {
     location: 'index.ts - mongoose.connect',
     additionalInfo: 'Failed to connect to MongoDB on startup',
   });
+  // Try to reconnect
+  reconnectToMongoDB();
 });
 
 // Wait for MongoDB connection before starting server
 mongoose.connection.on('connected', async () => {
   logger.log('✅ Connected to MongoDB');
+  reconnectAttempts = 0; // Reset attempts on successful connection
 
   try {
     const response: ILightRecord[] = await LightRecords.find({
@@ -52,11 +96,13 @@ mongoose.connection.on('error', err => {
 });
 
 mongoose.connection.on('disconnected', () => {
-  logger.warn('⚠️ MongoDB disconnected');
+  logger.warn('⚠️ MongoDB disconnected - attempting to reconnect...');
   sendErrorToAdmin(new Error('MongoDB disconnected'), {
     location: 'index.ts - mongoose.connection.on(disconnected)',
-    additionalInfo: 'MongoDB connection lost',
+    additionalInfo: 'MongoDB connection lost - attempting automatic reconnection',
   });
+  // Automatically attempt to reconnect
+  reconnectToMongoDB();
 });
 
 app.get('/', (req: Request, res: Response): void => {
