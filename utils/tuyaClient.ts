@@ -3,14 +3,13 @@ import { tuyaAccessKey, tuyaBaseUrl, tuyaSecretKey } from './envVars';
 import { sendErrorToAdmin } from './errorHandler';
 import { logger } from './logger';
 
-interface TuyaStatusItem {
-  code: string;
-  value: boolean | string | number;
-}
-
-interface TuyaResponse {
+interface TuyaDeviceInfo {
   success: boolean;
-  result?: TuyaStatusItem[];
+  result?: {
+    online: boolean;
+    active_time?: number;
+    [key: string]: unknown;
+  };
 }
 
 const tuya = new TuyaContext({
@@ -21,7 +20,7 @@ const tuya = new TuyaContext({
 
 export const getDeviceStatus = async (deviceId: string): Promise<boolean> => {
   try {
-    logger.log(`[TUYA API] Making FRESH request to device ${deviceId}...`);
+    logger.log(`[TUYA API] Checking if device ${deviceId} is online...`);
     // Force fresh request by creating new context each time (no caching)
     const freshTuya = new TuyaContext({
       accessKey: tuyaAccessKey,
@@ -29,56 +28,26 @@ export const getDeviceStatus = async (deviceId: string): Promise<boolean> => {
       baseUrl: tuyaBaseUrl,
     });
 
-    const response = (await freshTuya.request({
+    // Check if device is online using device info endpoint
+    const deviceInfo = (await freshTuya.request({
       method: 'GET',
-      path: `/v1.0/iot-03/devices/${deviceId}/status`,
-    })) as TuyaResponse;
+      path: `/v1.0/devices/${deviceId}`,
+    })) as TuyaDeviceInfo;
 
-    logger.log(`[TUYA API] Response received: success=${response.success}, hasResult=${!!response.result}`);
-    if (response.result) {
-      logger.log(`[TUYA API] Response data: ${JSON.stringify(response.result)}`);
+    logger.log(`[TUYA API] Device info received: success=${deviceInfo.success}, online=${deviceInfo.result?.online}`);
+
+    // If device is online, light is ON
+    // If device is offline, light is OFF
+    if (deviceInfo.success && deviceInfo.result?.online) {
+      logger.log(`[TUYA API] Device ${deviceId} is online = light is ON`);
+      return true;
     }
 
-    // If request is successful and has result - device is online
-    if (response.success && response.result) {
-      // Check real power consumption (cur_power) - this indicates if there's electricity in the socket
-      // cur_power > 0 = there's electricity in the socket = light is ON
-      // cur_power = 0 = no electricity in the socket = light is OFF
-      // Note: switch_1 is for the device (e.g., kettle) plugged into the socket, not the socket itself
-      const powerItem = response.result.find((item: TuyaStatusItem) => item.code === 'cur_power');
-
-      if (powerItem !== undefined) {
-        // Convert to number, handle string "0" or number 0
-        const powerValue = typeof powerItem.value === 'number' ? powerItem.value : Number(powerItem.value) || 0;
-
-        logger.log(`[TUYA API] Found cur_power: ${powerValue}W (type: ${typeof powerItem.value})`);
-
-        // If power > 0, there's electricity in the socket = light is ON
-        if (powerValue > 0) {
-          logger.log(`[TUYA API] Power > 0, electricity is present = light is ON`);
-          return true;
-        }
-
-        // If power = 0, no electricity in the socket = light is OFF
-        logger.log(`[TUYA API] Power = 0, no electricity = light is OFF`);
-        return false;
-      }
-
-      // If cur_power not found, log warning and return false
-      logger.warn(
-        `[TUYA API] cur_power not found in response for device ${deviceId}. Available codes: ${response.result
-          .map((item: TuyaStatusItem) => item.code)
-          .join(', ')}`,
-      );
-      return false;
-    }
-
-    // Request failed or no result - device is offline, no light
-    logger.warn(`Device ${deviceId} appears to be offline or request failed`);
+    logger.log(`[TUYA API] Device ${deviceId} is offline = no light`);
     return false;
   } catch (error) {
     // Error fetching status - device is offline, no light
-    logger.error(`Error fetching device status for ${deviceId}:`, error);
+    logger.error(`Error fetching device online status for ${deviceId}:`, error);
     await sendErrorToAdmin(error, {
       location: 'getDeviceStatus (Tuya API)',
       deviceId,
