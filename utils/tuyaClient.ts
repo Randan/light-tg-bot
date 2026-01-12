@@ -28,11 +28,11 @@ export const getDeviceStatus = async (deviceId: string): Promise<boolean> => {
       secretKey: tuyaSecretKey,
       baseUrl: tuyaBaseUrl,
     });
-    
-    const response = await freshTuya.request({
+
+    const response = (await freshTuya.request({
       method: 'GET',
       path: `/v1.0/iot-03/devices/${deviceId}/status`,
-    }) as TuyaResponse;
+    })) as TuyaResponse;
 
     logger.log(`[TUYA API] Response received: success=${response.success}, hasResult=${!!response.result}`);
     if (response.result) {
@@ -41,52 +41,35 @@ export const getDeviceStatus = async (deviceId: string): Promise<boolean> => {
 
     // If request is successful and has result - device is online
     if (response.success && response.result) {
-      // Check real power consumption first - this is the most accurate indicator
-      const powerItem = response.result.find(
-        (item: TuyaStatusItem) => item.code === 'cur_power'
-      );
-      
-      if (powerItem) {
-        const powerValue = Number(powerItem.value) || 0;
-        const isOn = powerValue > 0;
-        logger.log(`[TUYA API] Power status: cur_power = ${powerValue}W (${isOn ? 'ON' : 'OFF'})`);
-        
-        // If power > 0, device is definitely on
-        if (isOn) {
+      // Check real power consumption (cur_power) - this indicates if there's electricity in the socket
+      // cur_power > 0 = there's electricity in the socket = light is ON
+      // cur_power = 0 = no electricity in the socket = light is OFF
+      // Note: switch_1 is for the device (e.g., kettle) plugged into the socket, not the socket itself
+      const powerItem = response.result.find((item: TuyaStatusItem) => item.code === 'cur_power');
+
+      if (powerItem !== undefined) {
+        // Convert to number, handle string "0" or number 0
+        const powerValue = typeof powerItem.value === 'number' ? powerItem.value : Number(powerItem.value) || 0;
+
+        logger.log(`[TUYA API] Found cur_power: ${powerValue}W (type: ${typeof powerItem.value})`);
+
+        // If power > 0, there's electricity in the socket = light is ON
+        if (powerValue > 0) {
+          logger.log(`[TUYA API] Power > 0, electricity is present = light is ON`);
           return true;
         }
-        
-        // If power = 0, check switch_1 as fallback (but power is more reliable)
-        const switchItem = response.result.find(
-          (item: TuyaStatusItem) =>
-            item.code === 'switch_1' || item.code === 'switch'
-        );
-        
-        if (switchItem) {
-          const switchValue = Boolean(switchItem.value);
-          logger.log(`[TUYA API] Switch status: ${switchItem.code} = ${switchItem.value}, but power = 0, so device is OFF`);
-          // Power = 0 means device is off, regardless of switch status
-          return false;
-        }
-        
-        // Power = 0 and no switch found = off
+
+        // If power = 0, no electricity in the socket = light is OFF
+        logger.log(`[TUYA API] Power = 0, no electricity = light is OFF`);
         return false;
       }
-      
-      // If no power data, fallback to switch_1
-      const statusItem = response.result.find(
-        (item: TuyaStatusItem) =>
-          item.code === 'switch_1' || item.code === 'switch'
+
+      // If cur_power not found, log warning and return false
+      logger.warn(
+        `[TUYA API] cur_power not found in response for device ${deviceId}. Available codes: ${response.result
+          .map((item: TuyaStatusItem) => item.code)
+          .join(', ')}`,
       );
-
-      if (statusItem) {
-        const switchValue = Boolean(statusItem.value);
-        logger.log(`[TUYA API] Switch status found (no power data): ${statusItem.code} = ${statusItem.value} (${switchValue ? 'ON' : 'OFF'})`);
-        return switchValue;
-      }
-
-      // If no switch found, log warning and return false (no switch = no light)
-      logger.warn(`[TUYA API] No switch or power status found in response for device ${deviceId}. Available codes: ${response.result.map((item: TuyaStatusItem) => item.code).join(', ')}`);
       return false;
     }
 
@@ -106,4 +89,3 @@ export const getDeviceStatus = async (deviceId: string): Promise<boolean> => {
 };
 
 export default tuya;
-

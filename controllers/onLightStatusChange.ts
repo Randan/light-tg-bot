@@ -2,7 +2,7 @@ import bot from '../bot';
 import { formatTime, localDbName, logger, sendErrorToAdmin } from '../utils';
 import { LightRecords } from '../schemas';
 import LightHistory from '../schemas/lightHistory.schema';
-import { ILightRecord } from '../interfaces';
+import type { ILightRecord } from '../interfaces';
 import { setValue } from 'node-global-storage';
 
 const updateLightRecords = async (): Promise<void> => {
@@ -23,8 +23,8 @@ const updateLightRecords = async (): Promise<void> => {
 
 const onLightStatusChange = async (
   record: ILightRecord,
-  isAutomatic: boolean = false,
-  lastHistoryTimestamp?: Date
+  isAutomatic = false,
+  lastHistoryTimestamp?: Date,
 ): Promise<void> => {
   const { status, userIds, deviceId } = record;
 
@@ -42,22 +42,22 @@ const onLightStatusChange = async (
       : '🔴 Світло вимкнене.\nСвітло було ' + timeFormatted;
   } else {
     // Manual check from user
-    message = status
-      ? '🟢 Світло є'
-      : '🔴 Світла нема';
+    message = status ? '🟢 Світло є' : '🔴 Світла нема';
   }
 
   try {
     // Send messages to all users
     await Promise.all(
-      userIds.map((id: number) => bot.sendMessage(id, message).catch((err) => {
-        logger.error(`Failed to send message to user ${id}`, err);
-        return sendErrorToAdmin(err, {
-          location: 'onLightStatusChange - sendMessage',
-          userId: id,
-          deviceId,
-        });
-      }))
+      userIds.map((id: number) =>
+        bot.sendMessage(id, message).catch(err => {
+          logger.error(`Failed to send message to user ${id}`, err);
+          return sendErrorToAdmin(err, {
+            location: 'onLightStatusChange - sendMessage',
+            userId: id,
+            deviceId,
+          });
+        }),
+      ),
     );
 
     // Update database and history in parallel
@@ -76,7 +76,7 @@ const onLightStatusChange = async (
     }
 
     // Update local cache asynchronously (don't wait for it)
-    updateLightRecords().catch((err) => {
+    updateLightRecords().catch(err => {
       logger.error('Failed to update light records cache', err);
     });
   } catch (err) {

@@ -1,5 +1,5 @@
 import bot from '../bot';
-import { logger, socketId, sendErrorToAdmin } from '../utils';
+import { logger, sendErrorToAdmin, socketId } from '../utils';
 import { getDeviceStatus } from '../utils/tuyaClient';
 
 const checkStatus = async (id: number): Promise<void> => {
@@ -26,9 +26,7 @@ const checkStatus = async (id: number): Promise<void> => {
     const deviceStatus = await getDeviceStatus(socketId);
     logger.log(`[USER REQUEST] Device status: ${deviceStatus ? 'ON' : 'OFF'}`);
 
-    const message = deviceStatus
-      ? '🟢 Світло є'
-      : '🔴 Світла нема';
+    const message = deviceStatus ? '🟢 Світло є' : '🔴 Світла нема';
 
     bot.sendMessage(id, message);
     logger.log(`[USER REQUEST] Status sent to user ${id}`);

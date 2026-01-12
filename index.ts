@@ -1,11 +1,12 @@
 process.env.NTBA_FIX_319 = '1';
 
 /* eslint-disable import/first */
-import express, { Express, Request, Response } from 'express';
+import type { Express, Request, Response } from 'express';
+import express from 'express';
 import mongoose from 'mongoose';
 import { setValue } from 'node-global-storage';
-import { appPort, dbMongooseUri, localDbName, logger, setupGlobalErrorHandlers, sendErrorToAdmin } from './utils';
-import { ILightRecord } from './interfaces';
+import { appPort, dbMongooseUri, localDbName, logger, sendErrorToAdmin, setupGlobalErrorHandlers } from './utils';
+import type { ILightRecord } from './interfaces';
 import { LightRecords } from './schemas';
 
 // Setup global error handlers
@@ -14,7 +15,7 @@ setupGlobalErrorHandlers();
 const app: Express = express();
 
 // Connect to MongoDB and wait for connection
-mongoose.connect(dbMongooseUri).catch((err) => {
+mongoose.connect(dbMongooseUri).catch(err => {
   logger.error('Failed to connect to MongoDB:', err);
   sendErrorToAdmin(err, {
     location: 'index.ts - mongoose.connect',
@@ -42,7 +43,7 @@ mongoose.connection.on('connected', async () => {
   }
 });
 
-mongoose.connection.on('error', (err) => {
+mongoose.connection.on('error', err => {
   logger.error('MongoDB connection error:', err);
   sendErrorToAdmin(err, {
     location: 'index.ts - mongoose.connection.on(error)',

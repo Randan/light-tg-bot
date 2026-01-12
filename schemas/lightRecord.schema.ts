@@ -1,6 +1,6 @@
 import mongoose, { Schema } from 'mongoose';
 import { dbLightCollection } from '../utils';
-import { ILightRecord } from '../interfaces';
+import type { ILightRecord } from '../interfaces';
 
 const lightRecordSchema = new Schema<ILightRecord>({
   status: Boolean,

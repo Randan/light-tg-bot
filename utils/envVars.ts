@@ -12,9 +12,7 @@ const tuyaBaseUrl: string = process.env.TUYA_BASE_URL || 'https://openapi.tuyaus
 const socketId: string = process.env.SOCKET_ID || 'https://openapi.tuyaus.com';
 const env: string = process.env.ENV || 'prod';
 
-const dbMongooseUri: string = dbUrl
-  ? dbUrl + '?retryWrites=true&w=majority'
-  : '';
+const dbMongooseUri: string = dbUrl ? dbUrl + '?retryWrites=true&w=majority' : '';
 
 export {
   adminId,

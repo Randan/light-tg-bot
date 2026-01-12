@@ -1,7 +1,7 @@
 import { getValue } from 'node-global-storage';
-import { ILightRecord } from '../interfaces';
+import type { ILightRecord } from '../interfaces';
 import onLightStatusChange from './onLightStatusChange';
-import { localDbName, logger, socketId, sendErrorToAdmin } from '../utils';
+import { localDbName, logger, sendErrorToAdmin, socketId } from '../utils';
 import { getDeviceStatus } from '../utils/tuyaClient';
 import LightHistory from '../schemas/lightHistory.schema';
 
@@ -39,7 +39,7 @@ const checkTuyaStatus = async (): Promise<void> => {
 
     // Status changed - update all records and notify users
     // Since all records track the same device, we can process them in parallel
-    const updatePromises = Object.values(lightRecords).map(async (record) => {
+    const updatePromises = Object.values(lightRecords).map(async record => {
       record.status = Boolean(deviceStatus);
       return onLightStatusChange(record, true, lastHistoryEntry?.timestamp);
     });
@@ -47,7 +47,9 @@ const checkTuyaStatus = async (): Promise<void> => {
     await Promise.all(updatePromises);
 
     logger.log(
-      `[CRON] Device ${socketId} status changed: ${lastStatus === null ? 'NONE' : lastStatus ? 'ON' : 'OFF'} -> ${deviceStatus ? 'ON' : 'OFF'}`
+      `[CRON] Device ${socketId} status changed: ${lastStatus === null ? 'NONE' : lastStatus ? 'ON' : 'OFF'} -> ${
+        deviceStatus ? 'ON' : 'OFF'
+      }`,
     );
     logger.log('[CRON] Light status check completed');
   } catch (err) {

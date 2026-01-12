@@ -43,6 +43,7 @@ module.exports = {
     '@typescript-eslint/no-empty-function': 'off',
     '@typescript-eslint/no-unused-vars': 'off',
     '@typescript-eslint/no-explicit-any': 'error',
+    '@typescript-eslint/ban-ts-comment': ['error', { 'ts-expect-error': 'allow-with-description' }],
     '@typescript-eslint/consistent-type-imports': [
       'error',
       {
@@ -53,8 +54,8 @@ module.exports = {
     // Import
     'import/first': 'error',
     'import/newline-after-import': 'error',
-    'import/no-duplicates': 'error',
-    'import/no-self-import': 'error',
+    'import/no-duplicates': 'off', // Disabled due to TypeScript resolver issues
+    'import/no-self-import': 'off', // Disabled due to TypeScript resolver issues
     'import/extensions': [
       'off',
       'ignorePackages',

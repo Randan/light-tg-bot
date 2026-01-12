@@ -1,5 +1,5 @@
 import mongoose, { Schema } from 'mongoose';
-import { ILightHistory } from '../interfaces';
+import type { ILightHistory } from '../interfaces';
 import { dbLightHistoryCollection } from '../utils';
 
 export type ILightHistoryDocument = mongoose.Document & ILightHistory;

@@ -8,10 +8,7 @@ interface ErrorContext {
   additionalInfo?: string;
 }
 
-export const sendErrorToAdmin = async (
-  error: Error | unknown,
-  context?: ErrorContext
-): Promise<void> => {
+export const sendErrorToAdmin = async (error: Error | unknown, context?: ErrorContext): Promise<void> => {
   try {
     if (!adminId) {
       console.error('ADMIN_TG_ID is not configured, cannot send error notification');
@@ -46,9 +43,7 @@ export const sendErrorToAdmin = async (
       // Truncate stack trace if too long (Telegram has message limit)
       const maxStackLength = 1000;
       const truncatedStack =
-        errorStack.length > maxStackLength
-          ? errorStack.substring(0, maxStackLength) + '...'
-          : errorStack;
+        errorStack.length > maxStackLength ? errorStack.substring(0, maxStackLength) + '...' : errorStack;
 
       message += `\n*Stack trace:*\n\`\`\`\n${truncatedStack}\n\`\`\``;
     }
