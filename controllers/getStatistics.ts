@@ -11,46 +11,57 @@ const getStatistics = async (id: number, period: string): Promise<void> => {
 
     const now = new Date();
     let startDate: Date;
-    let periodName: string;
+    let periodNameGenitive: string;
 
     switch (period) {
-      case 'day':
-        startDate = new Date(now.getTime() - 24 * 60 * 60 * 1000);
-        periodName = 'день';
+      case 'day': {
+        startDate = new Date(now);
+        startDate.setHours(0, 0, 0, 0);
+        periodNameGenitive = 'дня';
         break;
-      case 'week':
-        startDate = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
-        periodName = 'тиждень';
+      }
+      case 'week': {
+        startDate = new Date(now);
+        const dayOfWeek = (startDate.getDay() + 6) % 7; // Monday=0
+        startDate.setDate(startDate.getDate() - dayOfWeek);
+        startDate.setHours(0, 0, 0, 0);
+        periodNameGenitive = 'тижня';
         break;
+      }
       case 'month':
-        startDate = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
-        periodName = 'місяць';
+        startDate = new Date(now.getFullYear(), now.getMonth(), 1);
+        periodNameGenitive = 'місяця';
         break;
-      case 'halfyear':
-        startDate = new Date(now.getTime() - 180 * 24 * 60 * 60 * 1000);
-        periodName = 'півроку';
+      case 'halfyear': {
+        const startMonth = now.getMonth() < 6 ? 0 : 6;
+        startDate = new Date(now.getFullYear(), startMonth, 1);
+        periodNameGenitive = 'півроку';
         break;
+      }
       case 'year':
-        startDate = new Date(now.getTime() - 365 * 24 * 60 * 60 * 1000);
-        periodName = 'рік';
+        startDate = new Date(now.getFullYear(), 0, 1);
+        periodNameGenitive = 'року';
         break;
       case 'all':
         startDate = new Date(0);
-        periodName = 'весь час';
+        periodNameGenitive = 'весь час';
         break;
       default:
         bot.sendMessage(id, 'Невідомий період');
         return;
     }
 
-    // Count records where status is true (light turned ON, meaning it was off before)
+    // Count records where status is false (light turned OFF)
     // Using countDocuments with index for better performance
     const count = await LightHistory.countDocuments({
       timestamp: { $gte: startDate },
-      status: true,
-    }).lean(); // Use lean() for better performance (returns plain JS objects)
+      status: false,
+    });
 
-    const message = `Кількість виключень за ${periodName}: ${count}`;
+    const message =
+      periodNameGenitive === 'весь час'
+        ? `Кількість відключень за весь час: ${count}`
+        : `Кількість відключень з початку ${periodNameGenitive}: ${count}`;
     bot.sendMessage(id, message);
   } catch (err) {
     logger.error('Failed to get statistics', err);
