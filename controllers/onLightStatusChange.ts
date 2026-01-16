@@ -42,7 +42,7 @@ const onLightStatusChange = async (
       : `🔴 Світло вимкнене (світло було ${timeFormatted})`;
   } else {
     // Manual check from user
-    message = status ? '🟢 Світло є' : '🔴 Світла нема';
+    message = status ? '🟢 Світло є' : '🔴 Світла немає';
   }
 
   try {

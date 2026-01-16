@@ -28,47 +28,47 @@ const formatTime = (delta: number): string => {
   if (years > 0) {
     const remainingMonths = months % 12;
     if (remainingMonths > 0) {
-      return `${formatUnit(years, 'року', 'роки', 'років')} ${formatUnit(
+      return `${formatUnit(years, 'рік', 'роки', 'років')} ${formatUnit(
         remainingMonths,
-        'місяця',
+        'місяць',
         'місяці',
         'місяців',
       )}`;
     }
-    return formatUnit(years, 'року', 'роки', 'років');
+    return formatUnit(years, 'рік', 'роки', 'років');
   }
 
   if (months > 0) {
     const remainingDays = days % 30;
     if (remainingDays > 0) {
-      return `${formatUnit(months, 'місяця', 'місяці', 'місяців')} ${formatUnit(remainingDays, 'дня', 'дні', 'днів')}`;
+      return `${formatUnit(months, 'місяць', 'місяці', 'місяців')} ${formatUnit(remainingDays, 'день', 'дні', 'днів')}`;
     }
-    return formatUnit(months, 'місяця', 'місяці', 'місяців');
+    return formatUnit(months, 'місяць', 'місяці', 'місяців');
   }
 
   if (days > 0) {
     const remainingHours = hours % 24;
     if (remainingHours > 0) {
-      return `${formatUnit(days, 'дня', 'дні', 'днів')} ${formatUnit(remainingHours, 'години', 'години', 'годин')}`;
+      return `${formatUnit(days, 'день', 'дні', 'днів')} ${formatUnit(remainingHours, 'година', 'години', 'годин')}`;
     }
-    return formatUnit(days, 'дня', 'дні', 'днів');
+    return formatUnit(days, 'день', 'дні', 'днів');
   }
 
   if (hours > 0) {
     const remainingMinutes = minutes % 60;
     if (remainingMinutes > 0) {
-      return `${formatUnit(hours, 'години', 'години', 'годин')} ${formatUnit(
+      return `${formatUnit(hours, 'година', 'години', 'годин')} ${formatUnit(
         remainingMinutes,
-        'хвилини',
+        'хвилина',
         'хвилини',
         'хвилин',
       )}`;
     }
-    return formatUnit(hours, 'години', 'години', 'годин');
+    return formatUnit(hours, 'година', 'години', 'годин');
   }
 
   if (minutes > 0) {
-    return formatUnit(minutes, 'хвилини', 'хвилини', 'хвилин');
+    return formatUnit(minutes, 'хвилина', 'хвилини', 'хвилин');
   }
 
   return 'менше хвилини';

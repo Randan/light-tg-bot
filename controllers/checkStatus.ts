@@ -33,7 +33,7 @@ const checkStatus = async (id: number): Promise<void> => {
       ? ` (${formatTime(new Date().getTime() - new Date(lastHistoryEntry.timestamp).getTime())})`
       : '';
 
-    const message = deviceStatus ? `🟢 Світло є${durationText}` : `🔴 Світла нема${durationText}`;
+    const message = deviceStatus ? `🟢 Світло є${durationText}` : `🔴 Світла немає${durationText}`;
 
     bot.sendMessage(id, message);
     logger.log(`[USER REQUEST] Status sent to user ${id}`);
