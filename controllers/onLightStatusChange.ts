@@ -38,8 +38,8 @@ const onLightStatusChange = async (
 
     // Automatic check from cron
     message = status
-      ? '🟢 Світло увімкнене.\nСвітла не було ' + timeFormatted
-      : '🔴 Світло вимкнене.\nСвітло було ' + timeFormatted;
+      ? `🟢 Світло увімкнене (світла не було ${timeFormatted})`
+      : `🔴 Світло вимкнене (світло було ${timeFormatted})`;
   } else {
     // Manual check from user
     message = status ? '🟢 Світло є' : '🔴 Світла нема';

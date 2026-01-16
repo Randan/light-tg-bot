@@ -1,5 +1,5 @@
 import bot from '../bot';
-import { logger, sendErrorToAdmin } from '../utils';
+import { formatTime, logger, sendErrorToAdmin } from '../utils';
 import LightHistory from '../schemas/lightHistory.schema';
 
 const getStatistics = async (id: number, period: string): Promise<void> => {
@@ -58,10 +58,47 @@ const getStatistics = async (id: number, period: string): Promise<void> => {
       status: false,
     });
 
+    const lastBeforePeriod = await LightHistory.findOne({ timestamp: { $lt: startDate } })
+      .sort({ timestamp: -1 })
+      .lean();
+
+    const periodEntries = await LightHistory.find({
+      timestamp: { $gte: startDate },
+    })
+      .sort({ timestamp: 1 })
+      .lean();
+
+    let totalOffMs = 0;
+    let offStartedAt: Date | null = null;
+
+    if (lastBeforePeriod?.status === false) {
+      offStartedAt = startDate;
+    }
+
+    periodEntries.forEach(entry => {
+      if (entry.status === false) {
+        if (!offStartedAt) {
+          offStartedAt = new Date(entry.timestamp);
+        }
+        return;
+      }
+
+      if (offStartedAt) {
+        totalOffMs += new Date(entry.timestamp).getTime() - offStartedAt.getTime();
+        offStartedAt = null;
+      }
+    });
+
+    if (offStartedAt) {
+      totalOffMs += now.getTime() - offStartedAt.getTime();
+    }
+
+    const durationText = formatTime(totalOffMs);
+
     const message =
       periodNameGenitive === 'весь час'
-        ? `Кількість відключень за весь час: ${count}`
-        : `Кількість відключень з початку ${periodNameGenitive}: ${count}`;
+        ? `Кількість відключень за весь час: ${count} (${durationText})`
+        : `Кількість відключень з початку ${periodNameGenitive}: ${count} (${durationText})`;
     bot.sendMessage(id, message);
   } catch (err) {
     logger.error('Failed to get statistics', err);

@@ -1,5 +1,6 @@
 import bot from '../bot';
-import { logger, sendErrorToAdmin, socketId } from '../utils';
+import LightHistory from '../schemas/lightHistory.schema';
+import { formatTime, logger, sendErrorToAdmin, socketId } from '../utils';
 import { getDeviceStatus } from '../utils/tuyaClient';
 
 const checkStatus = async (id: number): Promise<void> => {
@@ -26,7 +27,13 @@ const checkStatus = async (id: number): Promise<void> => {
     const deviceStatus = await getDeviceStatus(socketId);
     logger.log(`[USER REQUEST] Device status: ${deviceStatus ? 'ON' : 'OFF'}`);
 
-    const message = deviceStatus ? '🟢 Світло є' : '🔴 Світла нема';
+    const lastHistoryEntry = await LightHistory.findOne().sort({ timestamp: -1 }).lean();
+    const canShowDuration = lastHistoryEntry && lastHistoryEntry.status === deviceStatus;
+    const durationText = canShowDuration
+      ? ` (${formatTime(new Date().getTime() - new Date(lastHistoryEntry.timestamp).getTime())})`
+      : '';
+
+    const message = deviceStatus ? `🟢 Світло є${durationText}` : `🔴 Світла нема${durationText}`;
 
     bot.sendMessage(id, message);
     logger.log(`[USER REQUEST] Status sent to user ${id}`);

@@ -1,3 +1,22 @@
+const getForm = (count: number, one: string, few: string, many: string): string => {
+  const mod100 = count % 100;
+  if (mod100 >= 11 && mod100 <= 14) {
+    return many;
+  }
+
+  const mod10 = count % 10;
+  if (mod10 === 1) {
+    return one;
+  }
+  if (mod10 >= 2 && mod10 <= 4) {
+    return few;
+  }
+  return many;
+};
+
+const formatUnit = (count: number, one: string, few: string, many: string): string =>
+  `${count} ${getForm(count, one, few, many)}`;
+
 const formatTime = (delta: number): string => {
   const seconds = Math.floor(delta / 1000);
   const minutes = Math.floor(seconds / 60);
@@ -9,45 +28,47 @@ const formatTime = (delta: number): string => {
   if (years > 0) {
     const remainingMonths = months % 12;
     if (remainingMonths > 0) {
-      return `${years} ${years === 1 ? 'рік' : years < 5 ? 'роки' : 'років'} ${remainingMonths} ${
-        remainingMonths === 1 ? 'місяць' : remainingMonths < 5 ? 'місяці' : 'місяців'
-      }`;
+      return `${formatUnit(years, 'року', 'роки', 'років')} ${formatUnit(
+        remainingMonths,
+        'місяця',
+        'місяці',
+        'місяців',
+      )}`;
     }
-    return `${years} ${years === 1 ? 'рік' : years < 5 ? 'роки' : 'років'}`;
+    return formatUnit(years, 'року', 'роки', 'років');
   }
 
   if (months > 0) {
     const remainingDays = days % 30;
     if (remainingDays > 0) {
-      return `${months} ${months === 1 ? 'місяць' : months < 5 ? 'місяці' : 'місяців'} ${remainingDays} ${
-        remainingDays === 1 ? 'день' : remainingDays < 5 ? 'дні' : 'днів'
-      }`;
+      return `${formatUnit(months, 'місяця', 'місяці', 'місяців')} ${formatUnit(remainingDays, 'дня', 'дні', 'днів')}`;
     }
-    return `${months} ${months === 1 ? 'місяць' : months < 5 ? 'місяці' : 'місяців'}`;
+    return formatUnit(months, 'місяця', 'місяці', 'місяців');
   }
 
   if (days > 0) {
     const remainingHours = hours % 24;
     if (remainingHours > 0) {
-      return `${days} ${days === 1 ? 'день' : days < 5 ? 'дні' : 'днів'} ${remainingHours} ${
-        remainingHours === 1 ? 'година' : remainingHours < 5 ? 'години' : 'годин'
-      }`;
+      return `${formatUnit(days, 'дня', 'дні', 'днів')} ${formatUnit(remainingHours, 'години', 'години', 'годин')}`;
     }
-    return `${days} ${days === 1 ? 'день' : days < 5 ? 'дні' : 'днів'}`;
+    return formatUnit(days, 'дня', 'дні', 'днів');
   }
 
   if (hours > 0) {
     const remainingMinutes = minutes % 60;
     if (remainingMinutes > 0) {
-      return `${hours} ${hours === 1 ? 'година' : hours < 5 ? 'години' : 'годин'} ${remainingMinutes} ${
-        remainingMinutes === 1 ? 'хвилина' : remainingMinutes < 5 ? 'хвилини' : 'хвилин'
-      }`;
+      return `${formatUnit(hours, 'години', 'години', 'годин')} ${formatUnit(
+        remainingMinutes,
+        'хвилини',
+        'хвилини',
+        'хвилин',
+      )}`;
     }
-    return `${hours} ${hours === 1 ? 'година' : hours < 5 ? 'години' : 'годин'}`;
+    return formatUnit(hours, 'години', 'години', 'годин');
   }
 
   if (minutes > 0) {
-    return `${minutes} ${minutes === 1 ? 'хвилина' : minutes < 5 ? 'хвилини' : 'хвилин'}`;
+    return formatUnit(minutes, 'хвилини', 'хвилини', 'хвилин');
   }
 
   return 'менше хвилини';
