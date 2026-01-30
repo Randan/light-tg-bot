@@ -8,6 +8,43 @@ interface ErrorContext {
   additionalInfo?: string;
 }
 
+const RATE_LIMIT_MAX = 1;
+const RATE_LIMIT_WINDOW_MS = 5 * 60 * 1000;
+const DEDUP_COOLDOWN_MS = 10 * 60 * 1000;
+const BURST_THRESHOLD = 5;
+const BURST_WINDOW_MS = 5 * 60 * 1000;
+
+interface DedupEntry {
+  lastSentAt: number;
+  suppressedCount: number;
+}
+
+const dedupState = new Map<string, DedupEntry>();
+
+let rateWindowStart = 0;
+let rateCount = 0;
+
+let burstWindowStart = 0;
+let burstCount = 0;
+let burstNotified = false;
+
+const updateBurstState = (now: number): boolean => {
+  if (burstWindowStart === 0 || now - burstWindowStart > BURST_WINDOW_MS) {
+    burstWindowStart = now;
+    burstCount = 0;
+    burstNotified = false;
+  }
+
+  burstCount += 1;
+
+  if (burstCount >= BURST_THRESHOLD && !burstNotified) {
+    burstNotified = true;
+    return true;
+  }
+
+  return false;
+};
+
 export const sendErrorToAdmin = async (error: Error | unknown, context?: ErrorContext): Promise<void> => {
   try {
     if (!adminId) {
@@ -56,6 +93,60 @@ export const sendErrorToAdmin = async (error: Error | unknown, context?: ErrorCo
     console.error('Failed to send error notification to admin:', sendError);
     console.error('Original error:', error);
   }
+};
+
+export const sendErrorToAdminThrottled = async (
+  error: Error | unknown,
+  context: ErrorContext | undefined,
+  throttleKey: string,
+): Promise<void> => {
+  const key = throttleKey || 'default';
+  const now = Date.now();
+
+  const shouldSendBurst = updateBurstState(now);
+  if (shouldSendBurst) {
+    await sendErrorToAdmin(new Error('Серія помилок'), {
+      location: 'errorThrottle',
+      additionalInfo: `Серія помилок: ${burstCount} за ${Math.round(BURST_WINDOW_MS / 60000)} хв. Ключ: ${key}`,
+    });
+  }
+
+  const entry = dedupState.get(key) ?? { lastSentAt: 0, suppressedCount: 0 };
+
+  if (entry.lastSentAt && now - entry.lastSentAt < DEDUP_COOLDOWN_MS) {
+    entry.suppressedCount += 1;
+    dedupState.set(key, entry);
+    return;
+  }
+
+  if (rateWindowStart === 0 || now - rateWindowStart > RATE_LIMIT_WINDOW_MS) {
+    rateWindowStart = now;
+    rateCount = 0;
+  }
+
+  if (rateCount >= RATE_LIMIT_MAX) {
+    entry.suppressedCount += 1;
+    dedupState.set(key, entry);
+    return;
+  }
+
+  const infoParts: string[] = [];
+  if (context?.additionalInfo) {
+    infoParts.push(context.additionalInfo);
+  }
+  if (entry.suppressedCount > 0) {
+    infoParts.push(`Пропущено: ${entry.suppressedCount} повідомлень через rate limit/dedup`);
+  }
+
+  const mergedContext: ErrorContext | undefined =
+    infoParts.length > 0 ? { ...context, additionalInfo: infoParts.join('\n') } : context;
+
+  rateCount += 1;
+  entry.lastSentAt = now;
+  entry.suppressedCount = 0;
+  dedupState.set(key, entry);
+
+  await sendErrorToAdmin(error, mergedContext);
 };
 
 // Global error handlers

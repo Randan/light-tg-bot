@@ -30,4 +30,4 @@ export {
   tuyaBaseUrl,
 };
 
-export { sendErrorToAdmin, setupGlobalErrorHandlers } from './errorHandler';
+export { sendErrorToAdmin, sendErrorToAdminThrottled, setupGlobalErrorHandlers } from './errorHandler';

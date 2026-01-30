@@ -5,7 +5,15 @@ import type { Express, Request, Response } from 'express';
 import express from 'express';
 import mongoose from 'mongoose';
 import { setValue } from 'node-global-storage';
-import { appPort, dbMongooseUri, localDbName, logger, sendErrorToAdmin, setupGlobalErrorHandlers } from './utils';
+import {
+  appPort,
+  dbMongooseUri,
+  localDbName,
+  logger,
+  sendErrorToAdmin,
+  sendErrorToAdminThrottled,
+  setupGlobalErrorHandlers,
+} from './utils';
 import type { ILightRecord } from './interfaces';
 import { LightRecords } from './schemas';
 
@@ -45,10 +53,14 @@ const reconnectToMongoDB = async (): Promise<void> => {
       reconnectAttempts = 0;
     } catch (err) {
       logger.error('❌ Failed to reconnect to MongoDB:', err);
-      await sendErrorToAdmin(err as Error, {
-        location: 'index.ts - reconnectToMongoDB',
-        additionalInfo: `Reconnection attempt ${reconnectAttempts} failed`,
-      });
+      await sendErrorToAdminThrottled(
+        err as Error,
+        {
+          location: 'index.ts - reconnectToMongoDB',
+          additionalInfo: `Reconnection attempt ${reconnectAttempts} failed`,
+        },
+        'mongo.reconnect_failed',
+      );
       // Try again
       reconnectToMongoDB();
     }
@@ -58,10 +70,14 @@ const reconnectToMongoDB = async (): Promise<void> => {
 // Connect to MongoDB and wait for connection
 mongoose.connect(dbMongooseUri).catch(err => {
   logger.error('Failed to connect to MongoDB:', err);
-  sendErrorToAdmin(err, {
-    location: 'index.ts - mongoose.connect',
-    additionalInfo: 'Failed to connect to MongoDB on startup',
-  });
+  sendErrorToAdminThrottled(
+    err,
+    {
+      location: 'index.ts - mongoose.connect',
+      additionalInfo: 'Failed to connect to MongoDB on startup',
+    },
+    'mongo.connect_failed',
+  );
   // Try to reconnect
   reconnectToMongoDB();
 });
@@ -89,18 +105,26 @@ mongoose.connection.on('connected', async () => {
 
 mongoose.connection.on('error', err => {
   logger.error('MongoDB connection error:', err);
-  sendErrorToAdmin(err, {
-    location: 'index.ts - mongoose.connection.on(error)',
-    additionalInfo: 'MongoDB connection error',
-  });
+  sendErrorToAdminThrottled(
+    err,
+    {
+      location: 'index.ts - mongoose.connection.on(error)',
+      additionalInfo: 'MongoDB connection error',
+    },
+    'mongo.error',
+  );
 });
 
 mongoose.connection.on('disconnected', () => {
   logger.warn('⚠️ MongoDB disconnected - attempting to reconnect...');
-  sendErrorToAdmin(new Error('MongoDB disconnected'), {
-    location: 'index.ts - mongoose.connection.on(disconnected)',
-    additionalInfo: 'MongoDB connection lost - attempting automatic reconnection',
-  });
+  sendErrorToAdminThrottled(
+    new Error('MongoDB disconnected'),
+    {
+      location: 'index.ts - mongoose.connection.on(disconnected)',
+      additionalInfo: 'MongoDB connection lost - attempting automatic reconnection',
+    },
+    'mongo.disconnected',
+  );
   // Automatically attempt to reconnect
   reconnectToMongoDB();
 });
