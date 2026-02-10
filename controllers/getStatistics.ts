@@ -152,7 +152,7 @@ const getStatistics = async (id: number): Promise<void> => {
       });
     }
 
-    const lines: string[] = [];
+    const blocks: string[] = [];
     let prevCount = -1;
 
     for (const r of results) {
@@ -165,12 +165,15 @@ const getStatistics = async (id: number): Promise<void> => {
       const onMs = Math.max(0, r.periodMs - r.offMs);
       const onPct = r.periodMs > 0 ? Math.round((onMs / r.periodMs) * 100) : 0;
       const offPct = r.periodMs > 0 ? Math.round((r.offMs / r.periodMs) * 100) : 0;
-      const line = `${r.label}: ${r.count} (${durationText}, 🟢${onPct}%/🔴${offPct}%)`;
-      lines.push(line);
+
+      blocks.push(
+        `*${r.label}:*\n` + `кількість - ${r.count}\n` + `тривалість - ${durationText}\n` + `🟢${onPct}% 🔴${offPct}%`,
+      );
     }
 
-    const message = lines.length > 0 ? lines.join('\n') : 'Немає даних за сьогодні';
-    bot.sendMessage(id, message);
+    const header = '*Статистика відключень*\n';
+    const message = blocks.length > 0 ? header + '\n' + blocks.join('\n\n') : 'Немає даних за сьогодні';
+    bot.sendMessage(id, message, { parse_mode: 'Markdown' });
   } catch (err) {
     logger.error('Failed to get statistics', err);
     bot.sendMessage(id, 'Помилка при отриманні статистики');
