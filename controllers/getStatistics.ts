@@ -2,7 +2,99 @@ import bot from '../bot';
 import { formatTime, logger, sendErrorToAdmin } from '../utils';
 import LightHistory from '../schemas/lightHistory.schema';
 
-const getStatistics = async (id: number, period: string): Promise<void> => {
+interface HistoryEntry {
+  timestamp: Date;
+  status: boolean;
+}
+
+type PeriodKey = 'day' | 'week' | 'month' | 'halfyear' | 'year' | 'all';
+
+interface PeriodConfig {
+  key: PeriodKey;
+  label: string;
+  getStart: (now: Date, firstEntryTs: Date) => Date;
+}
+
+const getPeriodConfigs = (now: Date, firstEntryTs: Date): PeriodConfig[] => [
+  {
+    key: 'day',
+    label: 'за сьогодні',
+    getStart: n => {
+      const d = new Date(n);
+      d.setHours(0, 0, 0, 0);
+      return d;
+    },
+  },
+  {
+    key: 'week',
+    label: 'за тиждень',
+    getStart: n => {
+      const d = new Date(n);
+      const dayOfWeek = (d.getDay() + 6) % 7;
+      d.setDate(d.getDate() - dayOfWeek);
+      d.setHours(0, 0, 0, 0);
+      return d;
+    },
+  },
+  {
+    key: 'month',
+    label: 'за місяць',
+    getStart: n => new Date(n.getFullYear(), n.getMonth(), 1),
+  },
+  {
+    key: 'halfyear',
+    label: 'за півроку',
+    getStart: n => {
+      const startMonth = n.getMonth() < 6 ? 0 : 6;
+      return new Date(n.getFullYear(), startMonth, 1);
+    },
+  },
+  {
+    key: 'year',
+    label: 'за рік',
+    getStart: n => new Date(n.getFullYear(), 0, 1),
+  },
+  {
+    key: 'all',
+    label: 'за весь час',
+    getStart: (_, first) => new Date(first),
+  },
+];
+
+function computeOffDuration(
+  startDate: Date,
+  endDate: Date,
+  lastBeforePeriod: HistoryEntry | null,
+  periodEntries: HistoryEntry[],
+): number {
+  let totalOffMs = 0;
+  let offStartedAt: Date | null = null;
+
+  if (lastBeforePeriod?.status === false) {
+    offStartedAt = startDate;
+  }
+
+  periodEntries.forEach(entry => {
+    if (entry.status === false) {
+      if (!offStartedAt) {
+        offStartedAt = new Date(entry.timestamp);
+      }
+      return;
+    }
+    if (offStartedAt) {
+      totalOffMs += new Date(entry.timestamp).getTime() - offStartedAt.getTime();
+      offStartedAt = null;
+    }
+  });
+
+  if (offStartedAt) {
+    totalOffMs += endDate.getTime() - offStartedAt.getTime();
+  }
+
+  return totalOffMs;
+}
+
+const getStatistics = async (id: number): Promise<void> => {
   try {
     if (!id) {
       logger.error('User id is required');
@@ -10,95 +102,74 @@ const getStatistics = async (id: number, period: string): Promise<void> => {
     }
 
     const now = new Date();
-    let startDate: Date;
-    let periodNameGenitive: string;
 
-    switch (period) {
-      case 'day': {
-        startDate = new Date(now);
-        startDate.setHours(0, 0, 0, 0);
-        periodNameGenitive = 'дня';
-        break;
+    const firstEntry = await LightHistory.findOne().sort({ timestamp: 1 }).lean();
+    const firstEntryTs = firstEntry ? new Date(firstEntry.timestamp) : now;
+
+    const configs = getPeriodConfigs(now, firstEntryTs);
+
+    type PeriodResult = {
+      key: PeriodKey;
+      label: string;
+      count: number;
+      offMs: number;
+      periodMs: number;
+    };
+
+    const results: PeriodResult[] = [];
+
+    for (const config of configs) {
+      const startDate = config.getStart(now, firstEntryTs);
+      const periodMs = now.getTime() - startDate.getTime();
+      if (periodMs <= 0) {
+        results.push({ key: config.key, label: config.label, count: 0, offMs: 0, periodMs: 0 });
+        continue;
       }
-      case 'week': {
-        startDate = new Date(now);
-        const dayOfWeek = (startDate.getDay() + 6) % 7; // Monday=0
-        startDate.setDate(startDate.getDate() - dayOfWeek);
-        startDate.setHours(0, 0, 0, 0);
-        periodNameGenitive = 'тижня';
-        break;
-      }
-      case 'month':
-        startDate = new Date(now.getFullYear(), now.getMonth(), 1);
-        periodNameGenitive = 'місяця';
-        break;
-      case 'halfyear': {
-        const startMonth = now.getMonth() < 6 ? 0 : 6;
-        startDate = new Date(now.getFullYear(), startMonth, 1);
-        periodNameGenitive = 'півроку';
-        break;
-      }
-      case 'year':
-        startDate = new Date(now.getFullYear(), 0, 1);
-        periodNameGenitive = 'року';
-        break;
-      case 'all':
-        startDate = new Date(0);
-        periodNameGenitive = 'весь час';
-        break;
-      default:
-        bot.sendMessage(id, 'Невідомий період');
-        return;
+
+      const count = await LightHistory.countDocuments({
+        timestamp: { $gte: startDate },
+        status: false,
+      });
+
+      const lastBeforePeriod = await LightHistory.findOne({ timestamp: { $lt: startDate } })
+        .sort({ timestamp: -1 })
+        .lean();
+
+      const periodEntries = await LightHistory.find({
+        timestamp: { $gte: startDate },
+      })
+        .sort({ timestamp: 1 })
+        .lean();
+
+      const offMs = computeOffDuration(startDate, now, lastBeforePeriod, periodEntries);
+
+      results.push({
+        key: config.key,
+        label: config.label,
+        count,
+        offMs,
+        periodMs,
+      });
     }
 
-    // Count records where status is false (light turned OFF)
-    // Using countDocuments with index for better performance
-    const count = await LightHistory.countDocuments({
-      timestamp: { $gte: startDate },
-      status: false,
-    });
+    const lines: string[] = [];
+    let prevCount = -1;
 
-    const lastBeforePeriod = await LightHistory.findOne({ timestamp: { $lt: startDate } })
-      .sort({ timestamp: -1 })
-      .lean();
+    for (const r of results) {
+      const show = r.key === 'day' || r.count > prevCount;
+      if (!show) continue;
 
-    const periodEntries = await LightHistory.find({
-      timestamp: { $gte: startDate },
-    })
-      .sort({ timestamp: 1 })
-      .lean();
+      prevCount = r.count;
 
-    let totalOffMs = 0;
-    let offStartedAt: Date | null = null;
-
-    if (lastBeforePeriod?.status === false) {
-      offStartedAt = startDate;
+      const durationText = formatTime(r.offMs);
+      const onMs = Math.max(0, r.periodMs - r.offMs);
+      const onPct = r.periodMs > 0 ? Math.round((onMs / r.periodMs) * 100) : 0;
+      const offPct = r.periodMs > 0 ? Math.round((r.offMs / r.periodMs) * 100) : 0;
+      const line = `${r.label}: ${r.count} (${durationText}, 🟢${onPct}%/🔴${offPct}%)`;
+      lines.push(line);
     }
 
-    periodEntries.forEach(entry => {
-      if (entry.status === false) {
-        if (!offStartedAt) {
-          offStartedAt = new Date(entry.timestamp);
-        }
-        return;
-      }
-
-      if (offStartedAt) {
-        totalOffMs += new Date(entry.timestamp).getTime() - offStartedAt.getTime();
-        offStartedAt = null;
-      }
-    });
-
-    if (offStartedAt) {
-      totalOffMs += now.getTime() - offStartedAt.getTime();
-    }
-
-    const durationText = formatTime(totalOffMs);
-
-    const message =
-      periodNameGenitive === 'весь час'
-        ? `Кількість відключень за весь час: ${count} (${durationText})`
-        : `Кількість відключень з початку ${periodNameGenitive}: ${count} (${durationText})`;
+    const message = lines.length > 0 ? lines.join('\n') : 'Немає даних за сьогодні';
     bot.sendMessage(id, message);
   } catch (err) {
     logger.error('Failed to get statistics', err);
@@ -106,7 +177,7 @@ const getStatistics = async (id: number, period: string): Promise<void> => {
     await sendErrorToAdmin(err, {
       location: 'getStatistics',
       userId: id,
-      additionalInfo: `Failed to get statistics for period: ${period}`,
+      additionalInfo: 'Failed to get statistics',
     });
   }
 };
