@@ -29,11 +29,11 @@ const checkStatus = async (id: number): Promise<void> => {
 
     const lastHistoryEntry = await LightHistory.findOne().sort({ timestamp: -1 }).lean();
     const canShowDuration = lastHistoryEntry && lastHistoryEntry.status === deviceStatus;
-    const durationText = canShowDuration
-      ? ` (${formatTime(new Date().getTime() - new Date(lastHistoryEntry.timestamp).getTime())})`
+    const durationLine = canShowDuration
+      ? `\n${formatTime(new Date().getTime() - new Date(lastHistoryEntry.timestamp).getTime())}`
       : '';
 
-    const message = deviceStatus ? `🟢 Світло є${durationText}` : `🔴 Світла немає${durationText}`;
+    const message = deviceStatus ? `🟢 Світло є${durationLine}` : `🔴 Світла немає${durationLine}`;
 
     bot.sendMessage(id, message);
     logger.log(`[USER REQUEST] Status sent to user ${id}`);
