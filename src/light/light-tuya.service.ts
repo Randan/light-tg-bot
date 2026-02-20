@@ -4,9 +4,14 @@ import { TuyaContext } from '@tuya/tuya-connector-nodejs';
 import { LoggerService } from '../common/logger/logger.service';
 import { NotifyAdminService } from '../common/notify-admin/notify-admin.service';
 
-interface TuyaDeviceInfo {
-  success: boolean;
-  result?: { online: boolean; [key: string]: unknown };
+/** Response from tuya.device.detail() - Get Device Information API /v1.0/iot-03/devices/{id} */
+interface TuyaDeviceDetailResponse {
+  success?: boolean;
+  result?: {
+    online?: boolean;
+    result?: { online?: boolean; [key: string]: unknown };
+    [key: string]: unknown;
+  };
 }
 
 @Injectable()
@@ -26,16 +31,19 @@ export class LightTuyaService {
       if (!accessKey || !secretKey || !baseUrl) throw new Error('Tuya config missing');
       const tuya = new TuyaContext({ accessKey, secretKey, baseUrl });
 
-      const deviceInfo = (await tuya.request({
-        method: 'GET',
-        path: `/v1.0/devices/${deviceId}`,
-      })) as TuyaDeviceInfo;
+      // Use library's device.detail() - path /v1.0/iot-03/devices/{id} (was wrong: /v1.0/devices/{id})
+      const deviceInfo = (await tuya.device.detail({
+        device_id: deviceId,
+      })) as unknown as TuyaDeviceDetailResponse;
 
+      const online =
+        deviceInfo.result?.online === true ||
+        deviceInfo.result?.result?.online === true;
       this.logger.log(
-        `[TUYA API] Device info: success=${deviceInfo.success}, online=${deviceInfo.result?.online}`,
+        `[TUYA API] Device info: success=${deviceInfo.success}, online=${online}`,
       );
 
-      if (deviceInfo.success && deviceInfo.result?.online) {
+      if (deviceInfo.success !== false && online) {
         this.logger.log(`[TUYA API] Device ${deviceId} is online = light is ON`);
         return true;
       }

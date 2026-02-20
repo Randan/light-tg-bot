@@ -52,7 +52,11 @@ export function configValidationSchema(
     TUYA_SECRET_KEY: requireKey(config, 'TUYA_SECRET_KEY'),
     TUYA_BASE_URL:
       get(config, 'TUYA_BASE_URL') || 'https://openapi.tuyaus.com',
-    TUYA_DEVICE_ID: requireKey(config, 'TUYA_DEVICE_ID'),
+    TUYA_DEVICE_ID: (() => {
+      const v = get(config, 'TUYA_DEVICE_ID');
+      if (!v) throw new Error('Missing required env: TUYA_DEVICE_ID');
+      return v;
+    })(),
     TIMEZONE: requireKey(config, 'TIMEZONE'),
   };
 }
