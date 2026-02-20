@@ -31,3 +31,4 @@ export {
 };
 
 export { sendErrorToAdmin, sendErrorToAdminThrottled, setupGlobalErrorHandlers } from './errorHandler';
+export { isNetworkAvailable, waitForNetwork } from './networkCheck';

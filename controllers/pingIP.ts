@@ -1,12 +1,23 @@
 import { getValue } from 'node-global-storage';
 import type { ILightRecord } from '../interfaces';
 import onLightStatusChange from './onLightStatusChange';
-import { localDbName, logger, sendErrorToAdmin, socketId } from '../utils';
+import { isNetworkAvailable, localDbName, logger, sendErrorToAdmin, socketId } from '../utils';
 import { getDeviceStatus } from '../utils/tuyaClient';
 import LightHistory from '../schemas/lightHistory.schema';
 
+const NO_NETWORK_LOG_INTERVAL_MS = 5 * 60 * 1000; // 5 minutes
+let lastNoNetworkLogAt = 0;
+
 const checkTuyaStatus = async (): Promise<void> => {
   try {
+    if (!(await isNetworkAvailable())) {
+      const now = Date.now();
+      if (now - lastNoNetworkLogAt >= NO_NETWORK_LOG_INTERVAL_MS) {
+        logger.warn('[CRON] Skipping status check: no network');
+        lastNoNetworkLogAt = now;
+      }
+      return;
+    }
     logger.log('[CRON] Starting light status check...');
     const lightRecords: ILightRecord[] = getValue(localDbName);
 

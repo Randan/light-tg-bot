@@ -13,6 +13,7 @@ import {
   sendErrorToAdmin,
   sendErrorToAdminThrottled,
   setupGlobalErrorHandlers,
+  waitForNetwork,
 } from './utils';
 import type { ILightRecord } from './interfaces';
 import { LightRecords } from './schemas';
@@ -40,11 +41,12 @@ const reconnectToMongoDB = async (): Promise<void> => {
     return;
   }
 
-  // Calculate exponential backoff delay (capped at maxReconnectDelay)
-  const delay = Math.min(1000 * Math.pow(2, reconnectAttempts), maxReconnectDelay);
+  // Calculate exponential backoff delay (capped at maxReconnectDelay) with jitter
+  const baseDelay = Math.min(1000 * Math.pow(2, reconnectAttempts), maxReconnectDelay);
+  const delay = baseDelay + Math.floor(Math.random() * 1000);
   reconnectAttempts += 1;
 
-  logger.warn(`⏳ Attempting to reconnect to MongoDB in ${delay}ms (attempt ${reconnectAttempts})...`);
+  logger.warn(`Attempting to reconnect to MongoDB in ${delay}ms (attempt ${reconnectAttempts})...`);
 
   reconnectTimeout = setTimeout(async () => {
     try {
@@ -78,8 +80,7 @@ mongoose.connect(dbMongooseUri).catch(err => {
     },
     'mongo.connect_failed',
   );
-  // Try to reconnect
-  reconnectToMongoDB();
+  waitForNetwork().then(() => reconnectToMongoDB());
 });
 
 // Wait for MongoDB connection before starting server
@@ -105,6 +106,10 @@ mongoose.connection.on('connected', async () => {
 
 mongoose.connection.on('error', err => {
   logger.error('MongoDB connection error:', err);
+  // Do not notify admin on transient "MongoDB disconnected" - we reconnect automatically
+  if (err.message === 'MongoDB disconnected') {
+    return;
+  }
   sendErrorToAdminThrottled(
     err,
     {
@@ -116,17 +121,8 @@ mongoose.connection.on('error', err => {
 });
 
 mongoose.connection.on('disconnected', () => {
-  logger.warn('⚠️ MongoDB disconnected - attempting to reconnect...');
-  sendErrorToAdminThrottled(
-    new Error('MongoDB disconnected'),
-    {
-      location: 'index.ts - mongoose.connection.on(disconnected)',
-      additionalInfo: 'MongoDB connection lost - attempting automatic reconnection',
-    },
-    'mongo.disconnected',
-  );
-  // Automatically attempt to reconnect
-  reconnectToMongoDB();
+  logger.warn('MongoDB disconnected - waiting for network before reconnect...');
+  waitForNetwork().then(() => reconnectToMongoDB());
 });
 
 app.get('/', (req: Request, res: Response): void => {
