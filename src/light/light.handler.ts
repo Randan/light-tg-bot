@@ -1,15 +1,15 @@
-import type { ConfigService } from '@nestjs/config';
+import { ConfigService } from '@nestjs/config';
 import { InjectModel } from '@nestjs/mongoose';
-import type { LoggerService, NotifyAdminService } from '@randan/tg-logger';
+import { LoggerService, NotifyAdminService } from '@randan/tg-logger';
 import type { Model } from 'mongoose';
 import { Command, Ctx, Update } from 'nestjs-telegraf';
 import type { Context } from 'telegraf';
 
 import { formatTime } from './format-time.util';
-import type { LightCacheService } from './light-cache.service';
-import type { LightStatisticsService } from './light-statistics.service';
-import type { LightStatusService } from './light-status.service';
-import type { LightTuyaService } from './light-tuya.service';
+import { LightCacheService } from './light-cache.service';
+import { LightStatisticsService } from './light-statistics.service';
+import { LightStatusService } from './light-status.service';
+import { LightTuyaService } from './light-tuya.service';
 import { LightHistoryDoc } from './schemas/light-history.schema';
 
 const HELP_TEXT =

@@ -1,14 +1,14 @@
 import type { OnModuleInit } from '@nestjs/common';
 import { Injectable } from '@nestjs/common';
-import type { ConfigService } from '@nestjs/config';
+import { ConfigService } from '@nestjs/config';
 import { InjectModel } from '@nestjs/mongoose';
-import type { LoggerService, NotifyAdminService } from '@randan/tg-logger';
+import { LoggerService, NotifyAdminService } from '@randan/tg-logger';
 import type { Model } from 'mongoose';
 import * as cron from 'node-cron';
 
-import type { LightCacheService } from './light-cache.service';
-import type { LightStatusService } from './light-status.service';
-import type { LightTuyaService } from './light-tuya.service';
+import { LightCacheService } from './light-cache.service';
+import { LightStatusService } from './light-status.service';
+import { LightTuyaService } from './light-tuya.service';
 import { isNetworkAvailable } from './network.util';
 import { LightHistoryDoc } from './schemas/light-history.schema';
 

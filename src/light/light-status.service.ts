@@ -1,12 +1,13 @@
 import { Injectable } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
-import type { LoggerService } from '@randan/tg-logger';
+import { LoggerService } from '@randan/tg-logger';
 import type { Model } from 'mongoose';
 import { InjectBot } from 'nestjs-telegraf';
 import type { Telegraf } from 'telegraf';
 
 import { formatTime } from './format-time.util';
-import type { LightCacheService, LightRecordData } from './light-cache.service';
+import type { LightRecordData } from './light-cache.service';
+import { LightCacheService } from './light-cache.service';
 import { LightHistoryDoc } from './schemas/light-history.schema';
 import { LightRecord } from './schemas/light-record.schema';
 

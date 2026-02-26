@@ -1,8 +1,8 @@
 import type { OnModuleInit } from '@nestjs/common';
 import { Injectable } from '@nestjs/common';
-import type { ConfigService } from '@nestjs/config';
+import { ConfigService } from '@nestjs/config';
 import { InjectModel } from '@nestjs/mongoose';
-import type { LoggerService } from '@randan/tg-logger';
+import { LoggerService } from '@randan/tg-logger';
 import type { Model } from 'mongoose';
 import { getValue, setValue } from 'node-global-storage';
 

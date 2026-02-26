@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
-import type { LoggerService } from '@randan/tg-logger';
+import { LoggerService } from '@randan/tg-logger';
 import type { Model } from 'mongoose';
 
 import { formatTime } from './format-time.util';

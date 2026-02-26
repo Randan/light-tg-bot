@@ -36,12 +36,7 @@
     "@typescript-eslint/no-empty-function": "off",
     "@typescript-eslint/no-unused-vars": "off",
     "@typescript-eslint/no-explicit-any": "error",
-    "@typescript-eslint/consistent-type-imports": [
-      "error",
-      {
-        "prefer": "type-imports"
-      }
-    ],
+    "@typescript-eslint/consistent-type-imports": "off",
 
     "import/first": "error",
     "import/newline-after-import": "error",

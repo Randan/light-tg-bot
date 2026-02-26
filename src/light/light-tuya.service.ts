@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common';
-import type { ConfigService } from '@nestjs/config';
-import type { LoggerService, NotifyAdminService } from '@randan/tg-logger';
+import { ConfigService } from '@nestjs/config';
+import { LoggerService, NotifyAdminService } from '@randan/tg-logger';
 import { TuyaContext } from '@tuya/tuya-connector-nodejs';
 
 /** Response from tuya.device.detail() - Get Device Information API /v1.0/iot-03/devices/{id} */
