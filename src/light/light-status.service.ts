@@ -1,13 +1,14 @@
 import { Injectable } from '@nestjs/common';
-import { InjectBot } from 'nestjs-telegraf';
-import { Telegraf } from 'telegraf';
 import { InjectModel } from '@nestjs/mongoose';
-import { Model } from 'mongoose';
-import { LightRecord } from './schemas/light-record.schema';
-import { LightHistoryDoc } from './schemas/light-history.schema';
-import { LightCacheService, LightRecordData } from './light-cache.service';
+import type { LoggerService } from '@randan/tg-logger';
+import type { Model } from 'mongoose';
+import { InjectBot } from 'nestjs-telegraf';
+import type { Telegraf } from 'telegraf';
+
 import { formatTime } from './format-time.util';
-import { LoggerService } from '../common/logger/logger.service';
+import type { LightCacheService, LightRecordData } from './light-cache.service';
+import { LightHistoryDoc } from './schemas/light-history.schema';
+import { LightRecord } from './schemas/light-record.schema';
 
 @Injectable()
 export class LightStatusService {
@@ -19,11 +20,7 @@ export class LightStatusService {
     private readonly logger: LoggerService,
   ) {}
 
-  async onLightStatusChange(
-    record: LightRecordData,
-    isAutomatic: boolean,
-    lastHistoryTimestamp?: Date,
-  ): Promise<void> {
+  async onLightStatusChange(record: LightRecordData, isAutomatic: boolean, lastHistoryTimestamp?: Date): Promise<void> {
     const { status, userIds, deviceId } = record;
 
     let message: string;
@@ -39,8 +36,8 @@ export class LightStatusService {
 
     try {
       await Promise.all(
-        userIds.map((id) =>
-          this.bot.telegram.sendMessage(id, message).catch((err) => {
+        userIds.map(id =>
+          this.bot.telegram.sendMessage(id, message).catch(err => {
             this.logger.error(`Failed to send message to user ${id}`, err);
             return Promise.resolve();
           }),
@@ -54,7 +51,7 @@ export class LightStatusService {
         this.logger.log(`[HISTORY] Added: light ${status ? 'ON' : 'OFF'}`);
       }
 
-      this.cache.updateCache().catch((err) => {
+      this.cache.updateCache().catch(err => {
         this.logger.error('Failed to update light records cache', err);
       });
     } catch (err) {

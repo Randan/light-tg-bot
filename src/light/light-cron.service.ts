@@ -1,15 +1,16 @@
-import { Injectable, OnModuleInit } from '@nestjs/common';
-import { ConfigService } from '@nestjs/config';
-import * as cron from 'node-cron';
-import { LightTuyaService } from './light-tuya.service';
-import { LightCacheService } from './light-cache.service';
-import { LightStatusService } from './light-status.service';
+import type { OnModuleInit } from '@nestjs/common';
+import { Injectable } from '@nestjs/common';
+import type { ConfigService } from '@nestjs/config';
 import { InjectModel } from '@nestjs/mongoose';
-import { Model } from 'mongoose';
-import { LightHistoryDoc } from './schemas/light-history.schema';
+import type { LoggerService, NotifyAdminService } from '@randan/tg-logger';
+import type { Model } from 'mongoose';
+import * as cron from 'node-cron';
+
+import type { LightCacheService } from './light-cache.service';
+import type { LightStatusService } from './light-status.service';
+import type { LightTuyaService } from './light-tuya.service';
 import { isNetworkAvailable } from './network.util';
-import { LoggerService } from '../common/logger/logger.service';
-import { NotifyAdminService } from '../common/notify-admin/notify-admin.service';
+import { LightHistoryDoc } from './schemas/light-history.schema';
 
 const NO_NETWORK_LOG_INTERVAL_MS = 5 * 60 * 1000;
 let lastNoNetworkLogAt = 0;
@@ -29,12 +30,8 @@ export class LightCronService implements OnModuleInit {
 
   onModuleInit(): void {
     const timeZone = this.config.get<string>('TIMEZONE') || 'Europe/Kyiv';
-    cron.schedule(
-      '* * * * *',
-      () => this.checkTuyaStatus(),
-      { timezone: timeZone },
-    );
-    this.logger.log('Light status cron registered (every minute)');
+    cron.schedule('*/5 * * * *', () => this.checkTuyaStatus(), { timezone: timeZone });
+    this.logger.log('Light status cron registered (every 5 minutes)');
   }
 
   async checkTuyaStatus(): Promise<void> {
@@ -62,11 +59,7 @@ export class LightCronService implements OnModuleInit {
       const deviceStatus = await this.tuya.getDeviceStatus(deviceId);
       this.logger.log(`[CRON] Device status: ${deviceStatus ? 'ON' : 'OFF'}`);
 
-      const lastHistoryEntry = await this.lightHistoryModel
-        .findOne()
-        .sort({ timestamp: -1 })
-        .lean()
-        .exec();
+      const lastHistoryEntry = await this.lightHistoryModel.findOne().sort({ timestamp: -1 }).lean().exec();
       const lastStatus = lastHistoryEntry ? lastHistoryEntry.status : null;
 
       if (lastStatus === deviceStatus) {
@@ -75,22 +68,19 @@ export class LightCronService implements OnModuleInit {
       }
 
       for (const record of lightRecords) {
-        if (record.deviceId !== deviceId) continue;
+        if (record.deviceId !== deviceId) {
+          continue;
+        }
         record.status = Boolean(deviceStatus);
-        await this.status.onLightStatusChange(
-          record,
-          true,
-          lastHistoryEntry?.timestamp,
-        );
+        await this.status.onLightStatusChange(record, true, lastHistoryEntry?.timestamp);
       }
 
       this.logger.log('[CRON] Light status check completed');
     } catch (err) {
       this.logger.error('[CRON] Error in checkTuyaStatus', err);
-      this.notifyAdmin.send(
-        `🚨 Light cron error: ${err instanceof Error ? err.message : String(err)}`,
-        { parse_mode: 'Markdown' },
-      );
+      this.notifyAdmin.send(`🚨 Light cron error: ${err instanceof Error ? err.message : String(err)}`, {
+        parse_mode: 'Markdown',
+      });
     }
   }
 }

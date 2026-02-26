@@ -1,10 +1,12 @@
-import { Injectable, OnModuleInit } from '@nestjs/common';
-import { ConfigService } from '@nestjs/config';
+import type { OnModuleInit } from '@nestjs/common';
+import { Injectable } from '@nestjs/common';
+import type { ConfigService } from '@nestjs/config';
 import { InjectModel } from '@nestjs/mongoose';
-import { Model } from 'mongoose';
-import { setValue, getValue } from 'node-global-storage';
+import type { LoggerService } from '@randan/tg-logger';
+import type { Model } from 'mongoose';
+import { getValue, setValue } from 'node-global-storage';
+
 import { LightRecord } from './schemas/light-record.schema';
-import { LoggerService } from '../common/logger/logger.service';
 
 export interface LightRecordData {
   status: boolean;
@@ -21,7 +23,7 @@ export class LightCacheService implements OnModuleInit {
   ) {}
 
   onModuleInit(): void {
-    this.loadFromDb().catch((err) => {
+    this.loadFromDb().catch(err => {
       this.logger.error('Failed to load light records on init', err);
     });
   }
@@ -40,7 +42,9 @@ export class LightCacheService implements OnModuleInit {
 
   getRecords(): LightRecordData[] {
     const key = this.config.get<string>('LOCAL_DB_NAME');
-    if (!key) return [];
+    if (!key) {
+      return [];
+    }
     return (getValue(key) as LightRecordData[]) || [];
   }
 

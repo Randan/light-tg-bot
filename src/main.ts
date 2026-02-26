@@ -1,7 +1,8 @@
-import { NestFactory } from '@nestjs/core';
-import { AppModule } from './app.module';
 import { ConfigService } from '@nestjs/config';
-import { LoggerService } from './common/logger/logger.service';
+import { NestFactory } from '@nestjs/core';
+import { LoggerService } from '@randan/tg-logger';
+
+import { AppModule } from './app.module';
 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
@@ -14,7 +15,7 @@ async function bootstrap() {
   logger.log(`Light Bot is running on port ${port}`);
 }
 
-bootstrap().catch((err) => {
+bootstrap().catch(err => {
   console.error(err);
   process.exit(1);
 });

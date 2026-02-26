@@ -27,9 +27,7 @@ function requireKey(config: Record<string, unknown>, key: string): string {
   return value;
 }
 
-export function configValidationSchema(
-  config: Record<string, unknown>,
-): EnvConfig {
+export function configValidationSchema(config: Record<string, unknown>): EnvConfig {
   const port = Number(get(config, 'PORT'));
   const portFinal = Number.isNaN(port) || port <= 0 ? 3000 : port;
 
@@ -45,16 +43,16 @@ export function configValidationSchema(
     ADMIN_TELEGRAM_ID: get(config, 'ADMIN_TELEGRAM_ID'),
     DB_URL: dbMongooseUri,
     DB_LIGHT_COLLECTION: requireKey(config, 'DB_LIGHT_COLLECTION'),
-    DB_LIGHT_HISTORY_COLLECTION:
-      get(config, 'DB_LIGHT_HISTORY_COLLECTION') || 'light_history',
+    DB_LIGHT_HISTORY_COLLECTION: get(config, 'DB_LIGHT_HISTORY_COLLECTION') || 'light_history',
     LOCAL_DB_NAME: requireKey(config, 'LOCAL_DB_NAME'),
     TUYA_ACCESS_KEY: requireKey(config, 'TUYA_ACCESS_KEY'),
     TUYA_SECRET_KEY: requireKey(config, 'TUYA_SECRET_KEY'),
-    TUYA_BASE_URL:
-      get(config, 'TUYA_BASE_URL') || 'https://openapi.tuyaus.com',
+    TUYA_BASE_URL: get(config, 'TUYA_BASE_URL') || 'https://openapi.tuyaus.com',
     TUYA_DEVICE_ID: (() => {
       const v = get(config, 'TUYA_DEVICE_ID');
-      if (!v) throw new Error('Missing required env: TUYA_DEVICE_ID');
+      if (!v) {
+        throw new Error('Missing required env: TUYA_DEVICE_ID');
+      }
       return v;
     })(),
     TIMEZONE: requireKey(config, 'TIMEZONE'),

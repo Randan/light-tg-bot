@@ -1,15 +1,15 @@
-import { Command, Ctx, Update } from 'nestjs-telegraf';
-import { Context } from 'telegraf';
-import { LightTuyaService } from './light-tuya.service';
-import { LightStatusService } from './light-status.service';
-import { LightStatisticsService } from './light-statistics.service';
-import { LightCacheService } from './light-cache.service';
-import { formatTime } from './format-time.util';
-import { ConfigService } from '@nestjs/config';
-import { LoggerService } from '../common/logger/logger.service';
-import { NotifyAdminService } from '../common/notify-admin/notify-admin.service';
+import type { ConfigService } from '@nestjs/config';
 import { InjectModel } from '@nestjs/mongoose';
-import { Model } from 'mongoose';
+import type { LoggerService, NotifyAdminService } from '@randan/tg-logger';
+import type { Model } from 'mongoose';
+import { Command, Ctx, Update } from 'nestjs-telegraf';
+import type { Context } from 'telegraf';
+
+import { formatTime } from './format-time.util';
+import type { LightCacheService } from './light-cache.service';
+import type { LightStatisticsService } from './light-statistics.service';
+import type { LightStatusService } from './light-status.service';
+import type { LightTuyaService } from './light-tuya.service';
 import { LightHistoryDoc } from './schemas/light-history.schema';
 
 const HELP_TEXT =
@@ -41,7 +41,9 @@ export class LightHandler {
   @Command('help')
   async help(@Ctx() ctx: Context): Promise<void> {
     const chatId = ctx.chat?.id;
-    if (!chatId) return;
+    if (!chatId) {
+      return;
+    }
     await ctx.telegram.sendMessage(chatId, HELP_TEXT, {
       parse_mode: 'Markdown',
     });
@@ -51,7 +53,9 @@ export class LightHandler {
   async checkStatus(@Ctx() ctx: Context): Promise<void> {
     const from = ctx.from;
     const chatId = ctx.chat?.id;
-    if (!from || !chatId) return;
+    if (!from || !chatId) {
+      return;
+    }
 
     const id = from.id;
     const deviceId = this.config.get<string>('TUYA_DEVICE_ID');
@@ -69,34 +73,28 @@ export class LightHandler {
 
     try {
       const deviceStatus = await this.tuya.getDeviceStatus(deviceId);
-      const lastHistoryEntry = await this.lightHistoryModel
-        .findOne()
-        .sort({ timestamp: -1 })
-        .lean()
-        .exec();
-      const canShowDuration =
-        lastHistoryEntry && lastHistoryEntry.status === deviceStatus;
+      const lastHistoryEntry = await this.lightHistoryModel.findOne().sort({ timestamp: -1 }).lean().exec();
+      const canShowDuration = lastHistoryEntry && lastHistoryEntry.status === deviceStatus;
       const durationLine = canShowDuration
         ? `\n${formatTime(Date.now() - new Date(lastHistoryEntry!.timestamp).getTime())}`
         : '';
-      const message = deviceStatus
-        ? `🟢 Світло є${durationLine}`
-        : `🔴 Світла немає${durationLine}`;
+      const message = deviceStatus ? `🟢 Світло є${durationLine}` : `🔴 Світла немає${durationLine}`;
       await ctx.telegram.sendMessage(chatId, message);
     } catch (err) {
       this.logger.error('[USER REQUEST] Failed to check status', err);
       await ctx.telegram.sendMessage(chatId, 'Помилка при перевірці статусу');
-      this.notifyAdmin.send(
-        `🚨 Status check failed: ${err instanceof Error ? err.message : String(err)}`,
-        { parse_mode: 'Markdown' },
-      );
+      this.notifyAdmin.send(`🚨 Status check failed: ${err instanceof Error ? err.message : String(err)}`, {
+        parse_mode: 'Markdown',
+      });
     }
   }
 
   @Command('stats')
   async stats(@Ctx() ctx: Context): Promise<void> {
     const chatId = ctx.chat?.id;
-    if (!chatId) return;
+    if (!chatId) {
+      return;
+    }
 
     try {
       const message = await this.statistics.getStatisticsMessage();
@@ -106,10 +104,9 @@ export class LightHandler {
     } catch (err) {
       this.logger.error('Failed to get statistics', err);
       await ctx.telegram.sendMessage(chatId, 'Помилка при отриманні статистики');
-      this.notifyAdmin.send(
-        `🚨 Stats failed: ${err instanceof Error ? err.message : String(err)}`,
-        { parse_mode: 'Markdown' },
-      );
+      this.notifyAdmin.send(`🚨 Stats failed: ${err instanceof Error ? err.message : String(err)}`, {
+        parse_mode: 'Markdown',
+      });
     }
   }
 }

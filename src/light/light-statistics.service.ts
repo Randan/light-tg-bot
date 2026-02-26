@@ -1,9 +1,10 @@
 import { Injectable } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
-import { Model } from 'mongoose';
-import { LightHistoryDoc } from './schemas/light-history.schema';
+import type { LoggerService } from '@randan/tg-logger';
+import type { Model } from 'mongoose';
+
 import { formatTime } from './format-time.util';
-import { LoggerService } from '../common/logger/logger.service';
+import { LightHistoryDoc } from './schemas/light-history.schema';
 
 type PeriodKey =
   | 'day'
@@ -17,10 +18,16 @@ type PeriodKey =
 
 function formatDays(n: number): string {
   const mod100 = n % 100;
-  if (mod100 >= 11 && mod100 <= 14) return `${n} днів`;
+  if (mod100 >= 11 && mod100 <= 14) {
+    return `${n} днів`;
+  }
   const mod10 = n % 10;
-  if (mod10 === 1) return `${n} день`;
-  if (mod10 >= 2 && mod10 <= 4) return `${n} дні`;
+  if (mod10 === 1) {
+    return `${n} день`;
+  }
+  if (mod10 >= 2 && mod10 <= 4) {
+    return `${n} дні`;
+  }
   return `${n} днів`;
 }
 
@@ -49,10 +56,14 @@ function computeOffDuration(
 ): number {
   let totalOffMs = 0;
   let offStartedAt: Date | null = null;
-  if (lastBeforePeriod?.status === false) offStartedAt = startDate;
-  periodEntries.forEach((entry) => {
+  if (lastBeforePeriod?.status === false) {
+    offStartedAt = startDate;
+  }
+  periodEntries.forEach(entry => {
     if (entry.status === false) {
-      if (!offStartedAt) offStartedAt = new Date(entry.timestamp);
+      if (!offStartedAt) {
+        offStartedAt = new Date(entry.timestamp);
+      }
       return;
     }
     if (offStartedAt) {
@@ -60,7 +71,9 @@ function computeOffDuration(
       offStartedAt = null;
     }
   });
-  if (offStartedAt) totalOffMs += endDate.getTime() - offStartedAt.getTime();
+  if (offStartedAt) {
+    totalOffMs += endDate.getTime() - offStartedAt.getTime();
+  }
   return totalOffMs;
 }
 
@@ -74,11 +87,7 @@ export class LightStatisticsService {
 
   async getStatisticsMessage(): Promise<string> {
     const now = new Date();
-    const firstEntry = await this.lightHistoryModel
-      .findOne()
-      .sort({ timestamp: 1 })
-      .lean()
-      .exec();
+    const firstEntry = await this.lightHistoryModel.findOne().sort({ timestamp: 1 }).lean().exec();
     const firstEntryTs = firstEntry ? new Date(firstEntry.timestamp) : now;
 
     const weekStart = startOfThisWeek(now);
@@ -99,12 +108,12 @@ export class LightStatisticsService {
     }[] = [
       {
         key: 'day',
-        getStart: (n) => {
+        getStart: n => {
           const d = new Date(n);
           d.setHours(0, 0, 0, 0);
           return d;
         },
-        getEnd: (n) => new Date(n),
+        getEnd: n => new Date(n),
         endInclusive: true,
         getLabel: () => 'за сьогодні',
         shouldShow: () => true,
@@ -112,9 +121,9 @@ export class LightStatisticsService {
       {
         key: 'week_current',
         getStart: () => new Date(weekStart),
-        getEnd: (n) => new Date(n),
+        getEnd: n => new Date(n),
         endInclusive: true,
-        getLabel: (n) => {
+        getLabel: n => {
           const daysPassed = ((n.getDay() + 6) % 7) + 1;
           return `цей тиждень (${formatDays(daysPassed)})`;
         },
@@ -131,10 +140,10 @@ export class LightStatisticsService {
       {
         key: 'month_current',
         getStart: () => new Date(monthStart),
-        getEnd: (n) => new Date(n),
+        getEnd: n => new Date(n),
         endInclusive: true,
-        getLabel: (n) => `цей місяць (${formatDays(n.getDate())})`,
-        shouldShow: (n) => n.getDate() >= 7,
+        getLabel: n => `цей місяць (${formatDays(n.getDate())})`,
+        shouldShow: n => n.getDate() >= 7,
       },
       {
         key: 'month_prev',
@@ -147,10 +156,10 @@ export class LightStatisticsService {
       {
         key: 'year_current',
         getStart: () => new Date(yearStart),
-        getEnd: (n) => new Date(n),
+        getEnd: n => new Date(n),
         endInclusive: true,
-        getLabel: (n) => `цей рік (${formatDays(dayOfYear(n))})`,
-        shouldShow: (n) => dayOfYear(n) >= 7,
+        getLabel: n => `цей рік (${formatDays(dayOfYear(n))})`,
+        shouldShow: n => dayOfYear(n) >= 7,
       },
       {
         key: 'year_prev',
@@ -163,7 +172,7 @@ export class LightStatisticsService {
       {
         key: 'all',
         getStart: (_, first) => new Date(first),
-        getEnd: (n) => new Date(n),
+        getEnd: n => new Date(n),
         endInclusive: true,
         getLabel: () => 'за весь час',
         shouldShow: () => true,
@@ -173,11 +182,15 @@ export class LightStatisticsService {
     const results: { key: PeriodKey; label: string; count: number; offMs: number; periodMs: number }[] = [];
 
     for (const config of configs) {
-      if (!config.shouldShow(now, firstEntryTs)) continue;
+      if (!config.shouldShow(now, firstEntryTs)) {
+        continue;
+      }
       const startDate = config.getStart(now, firstEntryTs);
       const endDate = config.getEnd(now);
       const periodMs = endDate.getTime() - startDate.getTime();
-      if (periodMs <= 0) continue;
+      if (periodMs <= 0) {
+        continue;
+      }
       const endQuery = config.endInclusive ? { $lte: endDate } : { $lt: endDate };
       const count = await this.lightHistoryModel.countDocuments({
         timestamp: { $gte: startDate, ...endQuery },
@@ -210,56 +223,56 @@ export class LightStatisticsService {
 
     const currentKeys: PeriodKey[] = ['day', 'week_current', 'month_current', 'year_current'];
     const previousKeys: PeriodKey[] = ['week_prev', 'month_prev', 'year_prev'];
-    const byKey = new Map(results.map((r) => [r.key, r]));
+    const byKey = new Map(results.map(r => [r.key, r]));
 
     const block1Rows: string[] = [];
     for (const key of currentKeys) {
       const r = byKey.get(key);
-      if (!r) continue;
+      if (!r) {
+        continue;
+      }
       const durationText = formatTime(r.offMs);
       const onMs = Math.max(0, r.periodMs - r.offMs);
       const onPct = r.periodMs > 0 ? Math.round((onMs / r.periodMs) * 100) : 0;
       const offPct = r.periodMs > 0 ? Math.round((r.offMs / r.periodMs) * 100) : 0;
-      block1Rows.push(
-        `*${r.label}:*\nкількість - ${r.count}\nтривалість - ${durationText}\n🟢${onPct}% 🔴${offPct}%`,
-      );
+      block1Rows.push(`*${r.label}:*\nкількість - ${r.count}\nтривалість - ${durationText}\n🟢${onPct}% 🔴${offPct}%`);
     }
     const block2Rows: string[] = [];
     for (const key of previousKeys) {
       const r = byKey.get(key);
-      if (!r) continue;
+      if (!r) {
+        continue;
+      }
       const durationText = formatTime(r.offMs);
       const onMs = Math.max(0, r.periodMs - r.offMs);
       const onPct = r.periodMs > 0 ? Math.round((onMs / r.periodMs) * 100) : 0;
       const offPct = r.periodMs > 0 ? Math.round((r.offMs / r.periodMs) * 100) : 0;
-      block2Rows.push(
-        `*${r.label}:*\nкількість - ${r.count}\nтривалість - ${durationText}\n🟢${onPct}% 🔴${offPct}%`,
-      );
+      block2Rows.push(`*${r.label}:*\nкількість - ${r.count}\nтривалість - ${durationText}\n🟢${onPct}% 🔴${offPct}%`);
     }
     const allResult = byKey.get('all');
     let allRow = '';
     if (allResult) {
       const durationText = formatTime(allResult.offMs);
       const onMs = Math.max(0, allResult.periodMs - allResult.offMs);
-      const onPct =
-        allResult.periodMs > 0
-          ? Math.round((onMs / allResult.periodMs) * 100)
-          : 0;
-      const offPct =
-        allResult.periodMs > 0
-          ? Math.round((allResult.offMs / allResult.periodMs) * 100)
-          : 0;
+      const onPct = allResult.periodMs > 0 ? Math.round((onMs / allResult.periodMs) * 100) : 0;
+      const offPct = allResult.periodMs > 0 ? Math.round((allResult.offMs / allResult.periodMs) * 100) : 0;
       allRow = `*${allResult.label}:*\nкількість - ${allResult.count}\nтривалість - ${durationText}\n🟢${onPct}% 🔴${offPct}%`;
     }
 
     const parts: string[] = ['*Статистика відключень*\n'];
-    if (block1Rows.length > 0) parts.push('*Поточні періоди:*\n', block1Rows.join('\n\n'));
+    if (block1Rows.length > 0) {
+      parts.push('*Поточні періоди:*\n', block1Rows.join('\n\n'));
+    }
     if (block2Rows.length > 0) {
-      if (parts.length > 1) parts.push('');
+      if (parts.length > 1) {
+        parts.push('');
+      }
       parts.push('*Минулі періоди:*\n', block2Rows.join('\n\n'));
     }
     if (allRow) {
-      if (parts.length > 1) parts.push('');
+      if (parts.length > 1) {
+        parts.push('');
+      }
       parts.push(allRow);
     }
     return parts.length > 1 ? parts.join('\n') : 'Немає даних за сьогодні';
