@@ -9,32 +9,25 @@ jobs:
   deploy:
     runs-on: ubuntu-latest
     steps:
-    - name: Checkout
-      uses: actions/checkout@v3.3.0
+      - name: Checkout
+        uses: actions/checkout@v3.3.0
 
-    - name: Install PM2
-      run: npm install pm2 -g
+      - name: Connect to Tailscale
+        run: |
+          curl -fsSL https://tailscale.com/install.sh | sh
+          sudo tailscale up --authkey=${{ secrets.TS_AUTHKEY }} --accept-routes=false --accept-dns=false
+          tailscale status
 
-    - name: Connect to Tailscale
-      run: |
-        curl -fsSL https://tailscale.com/install.sh | sh
-        sudo tailscale up --authkey=${{ secrets.TS_AUTHKEY }} --accept-routes=false --accept-dns=false
-        tailscale status
-
-    - name: Deploy to RP5
-      uses: appleboy/ssh-action@v0.1.7
-      with:
-        host: ${{ secrets.HOST }}
-        username: ${{ secrets.USERNAME }}
-        password: ${{ secrets.PASSWORD }}
-        port: ${{ secrets.PORT }}
-        command_timeout: 10m
-        script: |
-          cd /home/randan/projects/light-tg-bot
-          git pull origin master
-          export NVM_DIR=~/.nvm
-          source ~/.nvm/nvm.sh
-          npm ci
-          npm run build
-          pm2 restart light-tg-bot 2>/dev/null || pm2 start npm --name "light-tg-bot" -- start
-          pm2 save
+      - name: Deploy to RP5
+        uses: appleboy/ssh-action@v0.1.7
+        with:
+          host: ${{ secrets.HOST }}
+          username: ${{ secrets.USERNAME }}
+          password: ${{ secrets.PASSWORD }}
+          port: ${{ secrets.PORT }}
+          command_timeout: 10m
+          script: |
+            cd /home/randan/projects/light-tg-bot
+            git pull origin master
+            docker compose up -d --build
+            docker image prune -f
