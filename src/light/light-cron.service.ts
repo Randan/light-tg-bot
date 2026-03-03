@@ -62,17 +62,36 @@ export class LightCronService implements OnModuleInit {
       const lastHistoryEntry = await this.lightHistoryModel.findOne().sort({ timestamp: -1 }).lean().exec();
       const lastStatus = lastHistoryEntry ? lastHistoryEntry.status : null;
 
+      this.logger.log(
+        `[CRON] lastHistory: ${lastHistoryEntry ? `${lastStatus} @ ${lastHistoryEntry.timestamp}` : 'null'}, cache records: ${lightRecords.length}`,
+      );
+
       if (lastStatus === deviceStatus) {
         this.logger.log('[CRON] Status unchanged, skipping');
         return;
       }
 
+      this.logger.log(
+        `[CRON] Status changed! ${lastStatus} -> ${deviceStatus}, processing ${lightRecords.length} records`,
+      );
+
+      let matched = 0;
       for (const record of lightRecords) {
+        this.logger.log(
+          `[CRON] Record deviceId="${record.deviceId}", target="${deviceId}", match=${record.deviceId === deviceId}`,
+        );
         if (record.deviceId !== deviceId) {
           continue;
         }
+        matched += 1;
         record.status = Boolean(deviceStatus);
         await this.status.onLightStatusChange(record, true, lastHistoryEntry?.timestamp);
+      }
+
+      if (matched === 0) {
+        this.logger.error(
+          `[CRON] No records matched deviceId="${deviceId}"! Cache has ${lightRecords.length} records.`,
+        );
       }
 
       this.logger.log('[CRON] Light status check completed');
