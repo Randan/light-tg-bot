@@ -57,6 +57,10 @@ export class LightCronService implements OnModuleInit {
       this.logger.log('[CRON] Starting light status check...');
       const lightRecords = this.cache.getRecords();
       const deviceStatus = await this.tuya.getDeviceStatus(deviceId);
+      if (deviceStatus === null) {
+        this.logger.error('[CRON] Device status is UNKNOWN (Tuya API failure), skipping this check');
+        return;
+      }
       this.logger.log(`[CRON] Device status: ${deviceStatus ? 'ON' : 'OFF'}`);
 
       const lastHistoryEntry = await this.lightHistoryModel.findOne().sort({ timestamp: -1 }).lean().exec();

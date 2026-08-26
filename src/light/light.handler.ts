@@ -73,6 +73,10 @@ export class LightHandler {
 
     try {
       const deviceStatus = await this.tuya.getDeviceStatus(deviceId);
+      if (deviceStatus === null) {
+        await ctx.telegram.sendMessage(chatId, '⚠️ Не вдалося перевірити статус: помилка Tuya API. Спробуй пізніше.');
+        return;
+      }
       const lastHistoryEntry = await this.lightHistoryModel.findOne().sort({ timestamp: -1 }).lean().exec();
       const canShowDuration = lastHistoryEntry && lastHistoryEntry.status === deviceStatus;
       const durationLine = canShowDuration
