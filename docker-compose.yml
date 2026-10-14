@@ -3,6 +3,9 @@ services:
     build: .
     container_name: light-tg-bot
     env_file: .env
+    environment:
+      # Local time for /stats period boundaries ("today", "this week")
+      TZ: Europe/Kyiv
     network_mode: host
     restart: unless-stopped
     logging:

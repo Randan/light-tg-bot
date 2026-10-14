@@ -1,109 +1,91 @@
-import type { OnModuleInit } from '@nestjs/common';
+import type { OnApplicationBootstrap, OnModuleInit } from '@nestjs/common';
 import { Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { InjectModel } from '@nestjs/mongoose';
 import { LoggerService, NotifyAdminService } from '@randan/tg-logger';
-import type { Model } from 'mongoose';
 import * as cron from 'node-cron';
 
-import { LightCacheService } from './light-cache.service';
 import { LightStatusService } from './light-status.service';
 import { LightTuyaService } from './light-tuya.service';
 import { isNetworkAvailable } from './network.util';
-import { LightHistoryDoc } from './schemas/light-history.schema';
 
 const NO_NETWORK_LOG_INTERVAL_MS = 5 * 60 * 1000;
-let lastNoNetworkLogAt = 0;
+
+export interface LightCheck {
+  status: boolean;
+  checkedAt: Date;
+}
 
 @Injectable()
-export class LightCronService implements OnModuleInit {
+export class LightCronService implements OnModuleInit, OnApplicationBootstrap {
+  private lastNoNetworkLogAt = 0;
+  private lastCheck: LightCheck | null = null;
+  private running = false;
+
   constructor(
     private readonly config: ConfigService,
     private readonly tuya: LightTuyaService,
-    private readonly cache: LightCacheService,
     private readonly status: LightStatusService,
-    @InjectModel(LightHistoryDoc.name)
-    private readonly lightHistoryModel: Model<LightHistoryDoc>,
     private readonly logger: LoggerService,
     private readonly notifyAdmin: NotifyAdminService,
   ) {}
 
   onModuleInit(): void {
     const timeZone = this.config.get<string>('TIMEZONE') || 'Europe/Kyiv';
-    cron.schedule('*/5 * * * *', () => this.checkTuyaStatus(), { timezone: timeZone });
-    this.logger.log('Light status cron registered (every 5 minutes)');
+    const interval = this.getPollIntervalMinutes();
+    cron.schedule(`*/${interval} * * * *`, () => this.checkTuyaStatus(), { timezone: timeZone });
+    this.logger.log(`Light status cron registered (every ${interval} minutes)`);
+  }
+
+  onApplicationBootstrap(): void {
+    void this.checkTuyaStatus();
+  }
+
+  getPollIntervalMinutes(): number {
+    return this.config.get<number>('TUYA_POLL_INTERVAL_MINUTES', 3);
+  }
+
+  /** The last successful Tuya answer; null until the first one arrives. */
+  getLastCheck(): LightCheck | null {
+    return this.lastCheck;
   }
 
   async checkTuyaStatus(): Promise<void> {
+    if (this.running) {
+      this.logger.warn('[CRON] Previous check still running, skipping');
+      return;
+    }
+    this.running = true;
+
     try {
       if (!(await isNetworkAvailable())) {
         const now = Date.now();
-        if (now - lastNoNetworkLogAt >= NO_NETWORK_LOG_INTERVAL_MS) {
+        if (now - this.lastNoNetworkLogAt >= NO_NETWORK_LOG_INTERVAL_MS) {
           this.logger.warn('[CRON] Skipping status check: no network');
-          lastNoNetworkLogAt = now;
+          this.lastNoNetworkLogAt = now;
         }
         return;
       }
 
-      const deviceId = this.config.get<string>('TUYA_DEVICE_ID');
-      if (!deviceId) {
-        this.logger.error('[CRON] TUYA_DEVICE_ID is not configured');
-        this.notifyAdmin.send('🚨 TUYA_DEVICE_ID is not configured', {
-          parse_mode: 'Markdown',
-        });
-        return;
-      }
-
-      this.logger.log('[CRON] Starting light status check...');
-      const lightRecords = this.cache.getRecords();
+      const deviceId = this.config.get<string>('TUYA_DEVICE_ID')!;
       const deviceStatus = await this.tuya.getDeviceStatus(deviceId);
       if (deviceStatus === null) {
         this.logger.error('[CRON] Device status is UNKNOWN (Tuya API failure), skipping this check');
         return;
       }
-      this.logger.log(`[CRON] Device status: ${deviceStatus ? 'ON' : 'OFF'}`);
+      this.lastCheck = { status: deviceStatus, checkedAt: new Date() };
 
-      const lastHistoryEntry = await this.lightHistoryModel.findOne().sort({ timestamp: -1 }).lean().exec();
-      const lastStatus = lastHistoryEntry ? lastHistoryEntry.status : null;
-
-      this.logger.log(
-        `[CRON] lastHistory: ${lastHistoryEntry ? `${lastStatus} @ ${lastHistoryEntry.timestamp}` : 'null'}, cache records: ${lightRecords.length}`,
-      );
-
-      if (lastStatus === deviceStatus) {
-        this.logger.log('[CRON] Status unchanged, skipping');
+      const lastHistoryEntry = await this.status.getLastHistoryEntry();
+      if (lastHistoryEntry?.status === deviceStatus) {
         return;
       }
 
-      this.logger.log(
-        `[CRON] Status changed! ${lastStatus} -> ${deviceStatus}, processing ${lightRecords.length} records`,
-      );
-
-      let matched = 0;
-      for (const record of lightRecords) {
-        this.logger.log(
-          `[CRON] Record deviceId="${record.deviceId}", target="${deviceId}", match=${record.deviceId === deviceId}`,
-        );
-        if (record.deviceId !== deviceId) {
-          continue;
-        }
-        matched += 1;
-        record.status = Boolean(deviceStatus);
-        await this.status.onLightStatusChange(record, true, lastHistoryEntry?.timestamp);
-      }
-
-      if (matched === 0) {
-        this.logger.error(
-          `[CRON] No records matched deviceId="${deviceId}"! Cache has ${lightRecords.length} records.`,
-        );
-      }
-
-      this.logger.log('[CRON] Light status check completed');
+      this.logger.log(`[CRON] Status changed: ${lastHistoryEntry?.status ?? 'none'} -> ${deviceStatus}`);
+      await this.status.applyStatusChange(deviceId, deviceStatus, lastHistoryEntry?.timestamp ?? null);
     } catch (err) {
       this.logger.error('[CRON] Error in checkTuyaStatus', err);
-      this.notifyAdmin.send(`🚨 Light cron error: ${err instanceof Error ? err.message : String(err)}`, {
-        parse_mode: 'Markdown',
-      });
+      this.notifyAdmin.send(`🚨 Light cron error: ${err instanceof Error ? err.message : String(err)}`);
+    } finally {
+      this.running = false;
     }
   }
 }

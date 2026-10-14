@@ -21,6 +21,7 @@ const API_ERROR_NOTIFY_INTERVAL_MS = 60 * 60 * 1000;
 @Injectable()
 export class LightTuyaService {
   private lastApiErrorNotifiedAt = 0;
+  private client: TuyaContext | null = null;
 
   constructor(
     private readonly config: ConfigService,
@@ -35,17 +36,7 @@ export class LightTuyaService {
    */
   async getDeviceStatus(deviceId: string): Promise<boolean | null> {
     try {
-      this.logger.log(`[TUYA API] Checking if device ${deviceId} is online...`);
-      const accessKey = this.config.get<string>('TUYA_ACCESS_KEY');
-      const secretKey = this.config.get<string>('TUYA_SECRET_KEY');
-      const baseUrl = this.config.get<string>('TUYA_BASE_URL');
-      if (!accessKey || !secretKey || !baseUrl) {
-        throw new Error('Tuya config missing');
-      }
-      const tuya = new TuyaContext({ accessKey, secretKey, baseUrl });
-
-      // Use library's device.detail() - path /v1.0/iot-03/devices/{id} (was wrong: /v1.0/devices/{id})
-      const deviceInfo = (await tuya.device.detail({
+      const deviceInfo = (await this.getClient().device.detail({
         device_id: deviceId,
       })) as unknown as TuyaDeviceDetailResponse;
 
@@ -68,12 +59,30 @@ export class LightTuyaService {
     }
   }
 
+  /**
+   * One client for the app lifetime: it keeps the access token in memory and
+   * refreshes it on expiry. A new client per request fetched a fresh token every
+   * time, doubling the API calls counted against the monthly quota.
+   */
+  private getClient(): TuyaContext {
+    if (!this.client) {
+      const accessKey = this.config.get<string>('TUYA_ACCESS_KEY');
+      const secretKey = this.config.get<string>('TUYA_SECRET_KEY');
+      const baseUrl = this.config.get<string>('TUYA_BASE_URL');
+      if (!accessKey || !secretKey || !baseUrl) {
+        throw new Error('Tuya config missing');
+      }
+      this.client = new TuyaContext({ accessKey, secretKey, baseUrl });
+    }
+    return this.client;
+  }
+
   private notifyApiError(message: string): void {
     const now = Date.now();
     if (now - this.lastApiErrorNotifiedAt < API_ERROR_NOTIFY_INTERVAL_MS) {
       return;
     }
     this.lastApiErrorNotifiedAt = now;
-    this.notifyAdmin.send(message, { parse_mode: 'Markdown' });
+    this.notifyAdmin.send(message);
   }
 }

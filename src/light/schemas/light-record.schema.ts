@@ -3,9 +3,6 @@ import { Document } from 'mongoose';
 
 @Schema()
 export class LightRecord extends Document {
-  @Prop({ required: true })
-  status: boolean;
-
   @Prop({ type: [Number], default: [] })
   userIds: number[];
 
@@ -14,4 +11,3 @@ export class LightRecord extends Document {
 }
 
 export const LightRecordSchema = SchemaFactory.createForClass(LightRecord);
-LightRecordSchema.index({ deviceId: 1 });

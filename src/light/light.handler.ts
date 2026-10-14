@@ -1,39 +1,38 @@
 import { ConfigService } from '@nestjs/config';
-import { InjectModel } from '@nestjs/mongoose';
 import { LoggerService, NotifyAdminService } from '@randan/tg-logger';
-import type { Model } from 'mongoose';
 import { Command, Ctx, Update } from 'nestjs-telegraf';
 import type { Context } from 'telegraf';
 
 import { formatTime } from './format-time.util';
-import { LightCacheService } from './light-cache.service';
+import { LightCronService } from './light-cron.service';
 import { LightStatisticsService } from './light-statistics.service';
 import { LightStatusService } from './light-status.service';
-import { LightTuyaService } from './light-tuya.service';
-import { LightHistoryDoc } from './schemas/light-history.schema';
 
 const HELP_TEXT =
   '👋 *Вітаю!*\n\n' +
-  'Я бот, який автоматично відстежує стан електрохарчування та повідомляє про зміни.\n\n' +
+  'Я бот, який автоматично відстежує стан електропостачання та повідомляє про зміни.\n\n' +
   '📋 *Доступні команди:*\n\n' +
+  '🔔 *Сповіщення:*\n' +
+  '/start - підписатися на сповіщення про світло\n' +
+  '/stop - відписатися\n\n' +
   '🔍 *Перевірка статусу:*\n' +
-  '/status - перевірити, чи є світло зараз\n\n' +
+  '/status - чи є світло зараз\n\n' +
   '📊 *Статистика відключень:*\n' +
   '/stats - статистика по періодах (сьогодні, тиждень, місяць тощо)\n\n' +
   'ℹ️ *Допомога:*\n' +
   '/help - показати це повідомлення\n\n' +
   '💪 *Разом до Перемоги!* 🇺🇦';
 
+/** A check older than this many poll intervals means Tuya has not answered for a while. */
+const STALE_CHECK_INTERVALS = 3;
+
 @Update()
 export class LightHandler {
   constructor(
     private readonly config: ConfigService,
-    private readonly tuya: LightTuyaService,
     private readonly lightStatus: LightStatusService,
+    private readonly cron: LightCronService,
     private readonly statistics: LightStatisticsService,
-    private readonly cache: LightCacheService,
-    @InjectModel(LightHistoryDoc.name)
-    private readonly lightHistoryModel: Model<LightHistoryDoc>,
     private readonly logger: LoggerService,
     private readonly notifyAdmin: NotifyAdminService,
   ) {}
@@ -49,47 +48,78 @@ export class LightHandler {
     });
   }
 
-  @Command('status')
-  async checkStatus(@Ctx() ctx: Context): Promise<void> {
-    const from = ctx.from;
+  @Command('start')
+  async start(@Ctx() ctx: Context): Promise<void> {
     const chatId = ctx.chat?.id;
-    if (!from || !chatId) {
+    if (!chatId) {
       return;
     }
-
-    const id = from.id;
-    const deviceId = this.config.get<string>('TUYA_DEVICE_ID');
-    if (!deviceId) {
-      await ctx.telegram.sendMessage(chatId, 'Помилка: TUYA_DEVICE_ID не налаштовано');
-      this.logger.error('[USER REQUEST] TUYA_DEVICE_ID is not configured');
-      this.notifyAdmin.send('🚨 TUYA_DEVICE_ID is not configured', {
-        parse_mode: 'Markdown',
-      });
-      return;
-    }
-
-    this.logger.log(`[USER REQUEST] User ${id} requested status check`);
-    await ctx.telegram.sendMessage(chatId, 'Перевіряю статус...');
 
     try {
-      const deviceStatus = await this.tuya.getDeviceStatus(deviceId);
-      if (deviceStatus === null) {
-        await ctx.telegram.sendMessage(chatId, '⚠️ Не вдалося перевірити статус: помилка Tuya API. Спробуй пізніше.');
+      const added = await this.lightStatus.subscribe(this.getDeviceId(), chatId);
+      await ctx.telegram.sendMessage(
+        chatId,
+        added
+          ? '🔔 Готово! Повідомлю, щойно світло зникне або з’явиться.\n\n/help - список команд'
+          : 'Ви вже підписані на сповіщення 🙂',
+      );
+    } catch (err) {
+      this.logger.error('Failed to subscribe', err);
+      await ctx.telegram.sendMessage(chatId, 'Не вдалося підписатися, спробуй пізніше');
+    }
+  }
+
+  @Command('stop')
+  async stop(@Ctx() ctx: Context): Promise<void> {
+    const chatId = ctx.chat?.id;
+    if (!chatId) {
+      return;
+    }
+
+    try {
+      const removed = await this.lightStatus.unsubscribe(this.getDeviceId(), chatId);
+      await ctx.telegram.sendMessage(
+        chatId,
+        removed ? '🔕 Сповіщення вимкнено. /start - щоб увімкнути знову' : 'Ви й так не підписані',
+      );
+    } catch (err) {
+      this.logger.error('Failed to unsubscribe', err);
+      await ctx.telegram.sendMessage(chatId, 'Не вдалося відписатися, спробуй пізніше');
+    }
+  }
+
+  /**
+   * Answers from the data the cron already collected: a live Tuya call per
+   * request would let users burn through the monthly API quota.
+   */
+  @Command('status')
+  async checkStatus(@Ctx() ctx: Context): Promise<void> {
+    const chatId = ctx.chat?.id;
+    if (!chatId) {
+      return;
+    }
+
+    try {
+      const lastHistoryEntry = await this.lightStatus.getLastHistoryEntry();
+      if (!lastHistoryEntry) {
+        await ctx.telegram.sendMessage(chatId, 'Ще немає даних. Спробуй за кілька хвилин.');
         return;
       }
-      const lastHistoryEntry = await this.lightHistoryModel.findOne().sort({ timestamp: -1 }).lean().exec();
-      const canShowDuration = lastHistoryEntry && lastHistoryEntry.status === deviceStatus;
-      const durationLine = canShowDuration
-        ? `\n${formatTime(Date.now() - new Date(lastHistoryEntry!.timestamp).getTime())}`
-        : '';
-      const message = deviceStatus ? `🟢 Світло є${durationLine}` : `🔴 Світла немає${durationLine}`;
-      await ctx.telegram.sendMessage(chatId, message);
+
+      const since = formatTime(Date.now() - new Date(lastHistoryEntry.timestamp).getTime());
+      const lines = [lastHistoryEntry.status ? `🟢 Світло є\n${since}` : `🔴 Світла немає\n${since}`];
+
+      const lastCheck = this.cron.getLastCheck();
+      const staleAfterMs = this.cron.getPollIntervalMinutes() * STALE_CHECK_INTERVALS * 60 * 1000;
+      if (!lastCheck || Date.now() - lastCheck.checkedAt.getTime() > staleAfterMs) {
+        lines.push('\n⚠️ Не вдається отримати свіжі дані від Tuya, статус може бути застарілим');
+      }
+
+      await ctx.telegram.sendMessage(chatId, lines.join('\n'));
     } catch (err) {
       this.logger.error('[USER REQUEST] Failed to check status', err);
       await ctx.telegram.sendMessage(chatId, 'Помилка при перевірці статусу');
-      this.notifyAdmin.send(`🚨 Status check failed: ${err instanceof Error ? err.message : String(err)}`, {
-        parse_mode: 'Markdown',
-      });
+      this.notifyAdmin.send(`🚨 Status check failed: ${err instanceof Error ? err.message : String(err)}`);
     }
   }
 
@@ -108,9 +138,11 @@ export class LightHandler {
     } catch (err) {
       this.logger.error('Failed to get statistics', err);
       await ctx.telegram.sendMessage(chatId, 'Помилка при отриманні статистики');
-      this.notifyAdmin.send(`🚨 Stats failed: ${err instanceof Error ? err.message : String(err)}`, {
-        parse_mode: 'Markdown',
-      });
+      this.notifyAdmin.send(`🚨 Stats failed: ${err instanceof Error ? err.message : String(err)}`);
     }
+  }
+
+  private getDeviceId(): string {
+    return this.config.get<string>('TUYA_DEVICE_ID')!;
   }
 }

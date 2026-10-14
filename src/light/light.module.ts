@@ -3,7 +3,6 @@ import { ConfigModule, ConfigService } from '@nestjs/config';
 import { MongooseModule } from '@nestjs/mongoose';
 
 import { LightHandler } from './light.handler';
-import { LightCacheService } from './light-cache.service';
 import { LightCronService } from './light-cron.service';
 import { LightStatisticsService } from './light-statistics.service';
 import { LightStatusService } from './light-status.service';
@@ -36,13 +35,6 @@ import { LightRecord, LightRecordSchema } from './schemas/light-record.schema';
       },
     ]),
   ],
-  providers: [
-    LightTuyaService,
-    LightCacheService,
-    LightStatusService,
-    LightStatisticsService,
-    LightCronService,
-    LightHandler,
-  ],
+  providers: [LightTuyaService, LightStatusService, LightStatisticsService, LightCronService, LightHandler],
 })
 export class LightModule {}
