@@ -22,6 +22,7 @@ const API_ERROR_NOTIFY_INTERVAL_MS = 60 * 60 * 1000;
 export class LightTuyaService {
   private lastApiErrorNotifiedAt = 0;
   private client: TuyaContext | null = null;
+  private lastError: string | null = null;
 
   constructor(
     private readonly config: ConfigService,
@@ -44,19 +45,27 @@ export class LightTuyaService {
         // e.g. code 28841002 "IoT Core service subscription has expired"
         const detail = `code=${deviceInfo.code ?? '?'} msg=${deviceInfo.msg ?? '?'}`;
         this.logger.error(`[TUYA API] Request rejected for ${deviceId}: ${detail}`);
+        this.lastError = detail;
         this.notifyApiError(`🚨 Tuya API rejected the request (${deviceId}): ${detail}`);
         return null;
       }
 
       const online = deviceInfo.result?.online === true || deviceInfo.result?.result?.online === true;
       this.logger.log(`[TUYA API] Device ${deviceId} is ${online ? 'online = light is ON' : 'offline = no light'}`);
+      this.lastError = null;
       return online;
     } catch (error) {
       this.logger.error(`Error fetching device status for ${deviceId}:`, error);
       const err = error instanceof Error ? error : new Error(String(error));
+      this.lastError = err.message;
       this.notifyApiError(`🚨 Tuya API error (${deviceId}): ${err.message}`);
       return null;
     }
+  }
+
+  /** Why the last Tuya call failed; null after a successful one. */
+  getLastError(): string | null {
+    return this.lastError;
   }
 
   /**

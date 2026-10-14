@@ -7,6 +7,7 @@ import { formatTime } from './format-time.util';
 import { LightCronService } from './light-cron.service';
 import { LightStatisticsService } from './light-statistics.service';
 import { LightStatusService } from './light-status.service';
+import { LightTuyaService } from './light-tuya.service';
 
 const HELP_TEXT =
   '👋 *Вітаю!*\n\n' +
@@ -33,6 +34,7 @@ export class LightHandler {
     private readonly lightStatus: LightStatusService,
     private readonly cron: LightCronService,
     private readonly statistics: LightStatisticsService,
+    private readonly tuya: LightTuyaService,
     private readonly logger: LoggerService,
     private readonly notifyAdmin: NotifyAdminService,
   ) {}
@@ -121,6 +123,43 @@ export class LightHandler {
       await ctx.telegram.sendMessage(chatId, 'Помилка при перевірці статусу');
       this.notifyAdmin.send(`🚨 Status check failed: ${err instanceof Error ? err.message : String(err)}`);
     }
+  }
+
+  /**
+   * Admin-only and unlisted: polls Tuya right now, through the same path as the
+   * cron, so a detected change is recorded and announced as usual. Anyone else
+   * is ignored silently, so the command cannot be used to drain the API quota.
+   */
+  @Command('statusrequest')
+  async statusRequest(@Ctx() ctx: Context): Promise<void> {
+    const chatId = ctx.chat?.id;
+    const adminId = this.config.get<string>('ADMIN_TELEGRAM_ID');
+    if (!chatId || !adminId || String(ctx.from?.id) !== adminId) {
+      return;
+    }
+
+    const outcome = await this.cron.pollDeviceStatus();
+    const lastCheck = this.cron.getLastCheck();
+
+    let message: string;
+    if (outcome === 'changed' || outcome === 'unchanged') {
+      const state = lastCheck?.status ? '🟢 Розетка онлайн — світло є' : '🔴 Розетка офлайн — світла немає';
+      message =
+        outcome === 'changed'
+          ? `${state}
+Статус змінився, записано в історію`
+          : state;
+    } else if (outcome === 'unknown') {
+      message = `⚠️ Tuya не відповіла: ${this.tuya.getLastError() ?? 'невідома помилка'}`;
+    } else if (outcome === 'busy') {
+      message = 'Перевірка вже триває, спробуй за хвилину';
+    } else if (outcome === 'no-network') {
+      message = '⚠️ На сервері немає інтернету';
+    } else {
+      message = '⚠️ Перевірка впала, деталі в логах';
+    }
+
+    await ctx.telegram.sendMessage(chatId, message);
   }
 
   @Command('stats')

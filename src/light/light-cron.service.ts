@@ -15,6 +15,9 @@ export interface LightCheck {
   checkedAt: Date;
 }
 
+/** What a poll ended with. */
+export type PollOutcome = 'busy' | 'no-network' | 'unknown' | 'failed' | 'unchanged' | 'changed';
+
 @Injectable()
 export class LightCronService implements OnModuleInit, OnApplicationBootstrap {
   private lastNoNetworkLogAt = 0;
@@ -49,10 +52,10 @@ export class LightCronService implements OnModuleInit, OnApplicationBootstrap {
     return this.lastCheck;
   }
 
-  async pollDeviceStatus(): Promise<void> {
+  async pollDeviceStatus(): Promise<PollOutcome> {
     if (this.running) {
       this.logger.warn('[CRON] Previous check still running, skipping');
-      return;
+      return 'busy';
     }
     this.running = true;
 
@@ -63,27 +66,29 @@ export class LightCronService implements OnModuleInit, OnApplicationBootstrap {
           this.logger.warn('[CRON] Skipping status check: no network');
           this.lastNoNetworkLogAt = now;
         }
-        return;
+        return 'no-network';
       }
 
       const deviceId = this.config.get<string>('TUYA_DEVICE_ID')!;
       const isOnline = await this.tuya.isDeviceOnline(deviceId);
       if (isOnline === null) {
         this.logger.error('[CRON] Device status is UNKNOWN (Tuya API failure), skipping this check');
-        return;
+        return 'unknown';
       }
       this.lastCheck = { status: isOnline, checkedAt: new Date() };
 
       const lastHistoryEntry = await this.status.getLastHistoryEntry();
       if (lastHistoryEntry?.status === isOnline) {
-        return;
+        return 'unchanged';
       }
 
       this.logger.log(`[CRON] Status changed: ${lastHistoryEntry?.status ?? 'none'} -> ${isOnline}`);
       await this.status.applyStatusChange(deviceId, isOnline, lastHistoryEntry?.timestamp ?? null);
+      return 'changed';
     } catch (err) {
       this.logger.error('[CRON] Error in pollDeviceStatus', err);
       this.notifyAdmin.send(`🚨 Light cron error: ${err instanceof Error ? err.message : String(err)}`);
+      return 'failed';
     } finally {
       this.running = false;
     }
