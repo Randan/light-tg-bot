@@ -93,7 +93,7 @@ export class LightHandler {
    * request would let users burn through the monthly API quota.
    */
   @Command('status')
-  async checkStatus(@Ctx() ctx: Context): Promise<void> {
+  async status(@Ctx() ctx: Context): Promise<void> {
     const chatId = ctx.chat?.id;
     if (!chatId) {
       return;

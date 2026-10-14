@@ -6,20 +6,20 @@ import { InjectBot } from 'nestjs-telegraf';
 import type { Telegraf } from 'telegraf';
 
 import { formatTime } from './format-time.util';
-import { LightHistoryDoc } from './schemas/light-history.schema';
-import { LightRecord } from './schemas/light-record.schema';
+import { LightHistory } from './schemas/light-history.schema';
+import { LightSubscription } from './schemas/light-subscription.schema';
 
 @Injectable()
 export class LightStatusService {
   constructor(
     @InjectBot() private readonly bot: Telegraf,
-    @InjectModel(LightRecord.name) private readonly lightRecordModel: Model<LightRecord>,
-    @InjectModel(LightHistoryDoc.name) private readonly lightHistoryModel: Model<LightHistoryDoc>,
+    @InjectModel(LightSubscription.name) private readonly subscriptionModel: Model<LightSubscription>,
+    @InjectModel(LightHistory.name) private readonly historyModel: Model<LightHistory>,
     private readonly logger: LoggerService,
   ) {}
 
   async getLastHistoryEntry(): Promise<{ timestamp: Date; status: boolean } | null> {
-    return this.lightHistoryModel.findOne().sort({ timestamp: -1 }).lean().exec();
+    return this.historyModel.findOne().sort({ timestamp: -1 }).lean().exec();
   }
 
   /**
@@ -28,7 +28,7 @@ export class LightStatusService {
    * there is no real change to report yet.
    */
   async applyStatusChange(deviceId: string, status: boolean, previousChangeAt: Date | null): Promise<void> {
-    await this.lightHistoryModel.create({ timestamp: new Date(), status });
+    await this.historyModel.create({ timestamp: new Date(), status });
     this.logger.log(`[HISTORY] Added: light ${status ? 'ON' : 'OFF'}`);
 
     if (!previousChangeAt) {
@@ -41,24 +41,24 @@ export class LightStatusService {
       ? `🟢 Світло увімкнене\nСвітла не було ${timeFormatted}`
       : `🔴 Світло вимкнене\nСвітло було ${timeFormatted}`;
 
-    const record = await this.lightRecordModel.findOne({ deviceId }).lean().exec();
-    const userIds = record?.userIds ?? [];
+    const subscription = await this.subscriptionModel.findOne({ deviceId }).lean().exec();
+    const chatIds = subscription?.chatIds ?? [];
 
-    await Promise.all(userIds.map(id => this.sendSafely(deviceId, id, message)));
-    this.logger.log(`[NOTIFY] Sent status change to ${userIds.length} subscribers`);
+    await Promise.all(chatIds.map(id => this.sendSafely(deviceId, id, message)));
+    this.logger.log(`[NOTIFY] Sent status change to ${chatIds.length} subscribers`);
   }
 
   /** Returns false when the chat was already subscribed. */
   async subscribe(deviceId: string, chatId: number): Promise<boolean> {
-    const result = await this.lightRecordModel
-      .updateOne({ deviceId }, { $addToSet: { userIds: chatId } }, { upsert: true })
+    const result = await this.subscriptionModel
+      .updateOne({ deviceId }, { $addToSet: { chatIds: chatId } }, { upsert: true })
       .exec();
     return result.modifiedCount > 0 || result.upsertedCount > 0;
   }
 
   /** Returns false when the chat was not subscribed. */
   async unsubscribe(deviceId: string, chatId: number): Promise<boolean> {
-    const result = await this.lightRecordModel.updateOne({ deviceId }, { $pull: { userIds: chatId } }).exec();
+    const result = await this.subscriptionModel.updateOne({ deviceId }, { $pull: { chatIds: chatId } }).exec();
     return result.modifiedCount > 0;
   }
 

@@ -4,7 +4,7 @@ import { LoggerService } from '@randan/tg-logger';
 import type { Model } from 'mongoose';
 
 import { formatTime } from './format-time.util';
-import { LightHistoryDoc } from './schemas/light-history.schema';
+import { LightHistory } from './schemas/light-history.schema';
 
 type PeriodKey =
   | 'day'
@@ -80,14 +80,14 @@ function computeOffDuration(
 @Injectable()
 export class LightStatisticsService {
   constructor(
-    @InjectModel(LightHistoryDoc.name)
-    private readonly lightHistoryModel: Model<LightHistoryDoc>,
+    @InjectModel(LightHistory.name)
+    private readonly historyModel: Model<LightHistory>,
     private readonly logger: LoggerService,
   ) {}
 
   async getStatisticsMessage(): Promise<string> {
     const now = new Date();
-    const firstEntry = await this.lightHistoryModel.findOne().sort({ timestamp: 1 }).lean().exec();
+    const firstEntry = await this.historyModel.findOne().sort({ timestamp: 1 }).lean().exec();
     const firstEntryTs = firstEntry ? new Date(firstEntry.timestamp) : now;
 
     const weekStart = startOfThisWeek(now);
@@ -98,7 +98,7 @@ export class LightStatisticsService {
     const lastMonthStart = new Date(now.getFullYear(), now.getMonth() - 1, 1);
     const lastYearStart = new Date(now.getFullYear() - 1, 0, 1);
 
-    const configs: {
+    const periods: {
       key: PeriodKey;
       getStart: (n: Date, f: Date) => Date;
       getEnd: (n: Date) => Date;
@@ -181,27 +181,27 @@ export class LightStatisticsService {
 
     const results: { key: PeriodKey; label: string; count: number; offMs: number; periodMs: number }[] = [];
 
-    for (const config of configs) {
-      if (!config.shouldShow(now, firstEntryTs)) {
+    for (const period of periods) {
+      if (!period.shouldShow(now, firstEntryTs)) {
         continue;
       }
-      const startDate = config.getStart(now, firstEntryTs);
-      const endDate = config.getEnd(now);
+      const startDate = period.getStart(now, firstEntryTs);
+      const endDate = period.getEnd(now);
       const periodMs = endDate.getTime() - startDate.getTime();
       if (periodMs <= 0) {
         continue;
       }
-      const endQuery = config.endInclusive ? { $lte: endDate } : { $lt: endDate };
-      const count = await this.lightHistoryModel.countDocuments({
+      const endQuery = period.endInclusive ? { $lte: endDate } : { $lt: endDate };
+      const count = await this.historyModel.countDocuments({
         timestamp: { $gte: startDate, ...endQuery },
         status: false,
       });
-      const lastBeforePeriod = await this.lightHistoryModel
+      const lastBeforePeriod = await this.historyModel
         .findOne({ timestamp: { $lt: startDate } })
         .sort({ timestamp: -1 })
         .lean()
         .exec();
-      const periodEntries = await this.lightHistoryModel
+      const periodEntries = await this.historyModel
         .find({ timestamp: { $gte: startDate, ...endQuery } })
         .sort({ timestamp: 1 })
         .lean()
@@ -213,8 +213,8 @@ export class LightStatisticsService {
         periodEntries as HistoryEntry[],
       );
       results.push({
-        key: config.key,
-        label: config.getLabel(now, startDate),
+        key: period.key,
+        label: period.getLabel(now, startDate),
         count,
         offMs,
         periodMs,

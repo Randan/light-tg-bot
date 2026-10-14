@@ -2,12 +2,12 @@ import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
 import { Document } from 'mongoose';
 
 @Schema()
-export class LightRecord extends Document {
+export class LightSubscription extends Document {
   @Prop({ type: [Number], default: [] })
-  userIds: number[];
+  chatIds: number[];
 
   @Prop({ required: true, unique: true })
   deviceId: string;
 }
 
-export const LightRecordSchema = SchemaFactory.createForClass(LightRecord);
+export const LightSubscriptionSchema = SchemaFactory.createForClass(LightSubscription);

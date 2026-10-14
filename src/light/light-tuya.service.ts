@@ -34,7 +34,7 @@ export class LightTuyaService {
    * Returns null when the answer is UNKNOWN — the Tuya API call failed or
    * reported an error. An API failure must never be presented as "power off".
    */
-  async getDeviceStatus(deviceId: string): Promise<boolean | null> {
+  async isDeviceOnline(deviceId: string): Promise<boolean | null> {
     try {
       const deviceInfo = (await this.getClient().device.detail({
         device_id: deviceId,

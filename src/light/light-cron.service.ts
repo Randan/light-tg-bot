@@ -32,12 +32,12 @@ export class LightCronService implements OnModuleInit, OnApplicationBootstrap {
   onModuleInit(): void {
     const timeZone = this.config.get<string>('TIMEZONE') || 'Europe/Kyiv';
     const interval = this.getPollIntervalMinutes();
-    cron.schedule(`*/${interval} * * * *`, () => this.checkTuyaStatus(), { timezone: timeZone });
+    cron.schedule(`*/${interval} * * * *`, () => this.pollDeviceStatus(), { timezone: timeZone });
     this.logger.log(`Light status cron registered (every ${interval} minutes)`);
   }
 
   onApplicationBootstrap(): void {
-    void this.checkTuyaStatus();
+    void this.pollDeviceStatus();
   }
 
   getPollIntervalMinutes(): number {
@@ -49,7 +49,7 @@ export class LightCronService implements OnModuleInit, OnApplicationBootstrap {
     return this.lastCheck;
   }
 
-  async checkTuyaStatus(): Promise<void> {
+  async pollDeviceStatus(): Promise<void> {
     if (this.running) {
       this.logger.warn('[CRON] Previous check still running, skipping');
       return;
@@ -67,22 +67,22 @@ export class LightCronService implements OnModuleInit, OnApplicationBootstrap {
       }
 
       const deviceId = this.config.get<string>('TUYA_DEVICE_ID')!;
-      const deviceStatus = await this.tuya.getDeviceStatus(deviceId);
-      if (deviceStatus === null) {
+      const isOnline = await this.tuya.isDeviceOnline(deviceId);
+      if (isOnline === null) {
         this.logger.error('[CRON] Device status is UNKNOWN (Tuya API failure), skipping this check');
         return;
       }
-      this.lastCheck = { status: deviceStatus, checkedAt: new Date() };
+      this.lastCheck = { status: isOnline, checkedAt: new Date() };
 
       const lastHistoryEntry = await this.status.getLastHistoryEntry();
-      if (lastHistoryEntry?.status === deviceStatus) {
+      if (lastHistoryEntry?.status === isOnline) {
         return;
       }
 
-      this.logger.log(`[CRON] Status changed: ${lastHistoryEntry?.status ?? 'none'} -> ${deviceStatus}`);
-      await this.status.applyStatusChange(deviceId, deviceStatus, lastHistoryEntry?.timestamp ?? null);
+      this.logger.log(`[CRON] Status changed: ${lastHistoryEntry?.status ?? 'none'} -> ${isOnline}`);
+      await this.status.applyStatusChange(deviceId, isOnline, lastHistoryEntry?.timestamp ?? null);
     } catch (err) {
-      this.logger.error('[CRON] Error in checkTuyaStatus', err);
+      this.logger.error('[CRON] Error in pollDeviceStatus', err);
       this.notifyAdmin.send(`🚨 Light cron error: ${err instanceof Error ? err.message : String(err)}`);
     } finally {
       this.running = false;

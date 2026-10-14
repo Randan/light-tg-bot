@@ -2,7 +2,7 @@ import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
 import { Document } from 'mongoose';
 
 @Schema()
-export class LightHistoryDoc extends Document {
+export class LightHistory extends Document {
   @Prop({ default: Date.now, required: true })
   timestamp: Date;
 
@@ -10,6 +10,6 @@ export class LightHistoryDoc extends Document {
   status: boolean;
 }
 
-export const LightHistorySchema = SchemaFactory.createForClass(LightHistoryDoc);
+export const LightHistorySchema = SchemaFactory.createForClass(LightHistory);
 LightHistorySchema.index({ timestamp: -1 });
 LightHistorySchema.index({ timestamp: 1, status: 1 });

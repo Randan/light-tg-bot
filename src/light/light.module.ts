@@ -7,28 +7,28 @@ import { LightCronService } from './light-cron.service';
 import { LightStatisticsService } from './light-statistics.service';
 import { LightStatusService } from './light-status.service';
 import { LightTuyaService } from './light-tuya.service';
-import { LightHistoryDoc, LightHistorySchema } from './schemas/light-history.schema';
-import { LightRecord, LightRecordSchema } from './schemas/light-record.schema';
+import { LightHistory, LightHistorySchema } from './schemas/light-history.schema';
+import { LightSubscription, LightSubscriptionSchema } from './schemas/light-subscription.schema';
 
 @Module({
   imports: [
     MongooseModule.forFeatureAsync([
       {
-        name: LightRecord.name,
+        name: LightSubscription.name,
         imports: [ConfigModule],
         useFactory: (config: ConfigService) => {
-          const schema = LightRecordSchema;
-          schema.set('collection', config.get<string>('DB_LIGHT_COLLECTION'));
+          const schema = LightSubscriptionSchema;
+          schema.set('collection', config.get<string>('DB_SUBSCRIPTIONS_COLLECTION'));
           return schema;
         },
         inject: [ConfigService],
       },
       {
-        name: LightHistoryDoc.name,
+        name: LightHistory.name,
         imports: [ConfigModule],
         useFactory: (config: ConfigService) => {
           const schema = LightHistorySchema;
-          schema.set('collection', config.get<string>('DB_LIGHT_HISTORY_COLLECTION'));
+          schema.set('collection', config.get<string>('DB_HISTORY_COLLECTION'));
           return schema;
         },
         inject: [ConfigService],

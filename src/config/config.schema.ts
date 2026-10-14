@@ -4,8 +4,8 @@ export interface EnvConfig {
   NODE_ENV: string;
   ADMIN_TELEGRAM_ID?: string;
   DB_URL: string;
-  DB_LIGHT_COLLECTION: string;
-  DB_LIGHT_HISTORY_COLLECTION: string;
+  DB_SUBSCRIPTIONS_COLLECTION: string;
+  DB_HISTORY_COLLECTION: string;
   TUYA_ACCESS_KEY: string;
   TUYA_SECRET_KEY: string;
   TUYA_BASE_URL: string;
@@ -58,8 +58,8 @@ export function configValidationSchema(config: Record<string, unknown>): EnvConf
     NODE_ENV: get(config, 'NODE_ENV') || 'production',
     ADMIN_TELEGRAM_ID: get(config, 'ADMIN_TELEGRAM_ID'),
     DB_URL: dbMongooseUri,
-    DB_LIGHT_COLLECTION: requireKey(config, 'DB_LIGHT_COLLECTION'),
-    DB_LIGHT_HISTORY_COLLECTION: get(config, 'DB_LIGHT_HISTORY_COLLECTION') || 'light_history',
+    DB_SUBSCRIPTIONS_COLLECTION: get(config, 'DB_SUBSCRIPTIONS_COLLECTION') || 'light_subscriptions',
+    DB_HISTORY_COLLECTION: get(config, 'DB_HISTORY_COLLECTION') || 'light_history',
     TUYA_ACCESS_KEY: requireKey(config, 'TUYA_ACCESS_KEY'),
     TUYA_SECRET_KEY: requireKey(config, 'TUYA_SECRET_KEY'),
     TUYA_BASE_URL: get(config, 'TUYA_BASE_URL') || 'https://openapi.tuyaus.com',
