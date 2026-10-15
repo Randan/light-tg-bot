@@ -15,7 +15,9 @@ import {
   formatDate,
   formatDurationAfter,
   formatMinutes,
+  scheduledTurnOff,
   scheduledTurnOn,
+  ScheduleStatus,
   zonedNow,
 } from './schedule-format.util';
 
@@ -122,8 +124,9 @@ export class LightHandler {
 
       const since = formatTime(Date.now() - new Date(lastHistoryEntry.timestamp).getTime());
       const lines = [lastHistoryEntry.status ? `🟢 Світло є\n${since}` : `🔴 Світла немає\n${since}`];
-      if (!lastHistoryEntry.status && this.schedule.isConfigured()) {
-        lines.push(await this.describeScheduledTurnOn());
+      const scheduleLine = await this.describeScheduleForStatus(lastHistoryEntry.status);
+      if (scheduleLine) {
+        lines.push(scheduleLine);
       }
 
       const lastCheck = this.cron.getLastCheck();
@@ -211,15 +214,27 @@ export class LightHandler {
     }
   }
 
-  private async describeScheduledTurnOn(): Promise<string> {
-    const { today, tomorrow } = await this.schedule.getCurrent();
-    const now = zonedNow(this.timeZone()).minutes;
-    const turnOn = scheduledTurnOn(today, tomorrow, now);
-    if ('reason' in turnOn) {
-      return turnOn.reason;
+  /**
+   * The schedule's next turn-off (power on) or turn-on (power off) moment for
+   * /status; null when the schedule says nothing about it.
+   */
+  private async describeScheduleForStatus(isPowerOn: boolean): Promise<string | null> {
+    if (!this.schedule.isConfigured()) {
+      return null;
     }
-    const day = turnOn.at >= 24 * 60 ? ' завтра' : '';
-    return `За графіком мають увімкнути${day} о ${formatMinutes(turnOn.at % (24 * 60))} (через ${formatDurationAfter(turnOn.at - now)})`;
+    const { today, tomorrow } = await this.schedule.getCurrent();
+    if (today?.status === ScheduleStatus.Emergency) {
+      return '🚨 Діють екстрені відключення, графік не діє';
+    }
+
+    const now = zonedNow(this.timeZone()).minutes;
+    const at = isPowerOn ? scheduledTurnOff(today, tomorrow, now) : scheduledTurnOn(today, tomorrow, now);
+    if (at === null) {
+      return null;
+    }
+    const action = isPowerOn ? 'вимкнуть' : 'мають увімкнути';
+    const day = at >= 24 * 60 ? ' завтра' : '';
+    return `За графіком ${action}${day} о ${formatMinutes(at % (24 * 60))} (через ${formatDurationAfter(at - now)})`;
   }
 
   /** Everything known about the schedule right now; says so plainly when nothing is. */

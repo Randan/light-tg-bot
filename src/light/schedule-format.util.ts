@@ -130,36 +130,53 @@ export function describeChange(dayTitle: string, day: ScheduleDay, previous: Sch
 }
 
 /**
- * When the power should come back according to the schedule, in minutes since
- * today's midnight (may exceed a day when the outage runs past midnight), or a
- * reason why it cannot be told.
+ * When the schedule says the power comes back, in minutes since today's
+ * midnight (past a day when the outage runs over midnight); null when the
+ * schedule has no outage going on right now.
  */
 export function scheduledTurnOn(
   today: ScheduleDay | null,
   tomorrow: ScheduleDay | null,
   nowMinutes: number,
-): { at: number } | { reason: string } {
-  if (!today) {
-    return { reason: 'Графіка на сьогодні немає' };
+): number | null {
+  if (today?.status !== ScheduleStatus.Applies) {
+    return null;
   }
-  if (today.status === ScheduleStatus.Emergency) {
-    return { reason: 'Діють екстрені відключення, за графіком час увімкнення невідомий' };
-  }
-  if (today.status === ScheduleStatus.Waiting) {
-    return { reason: 'Графік на сьогодні ще не опубліковано' };
-  }
-
   const current = outageRanges(today.slots).find(r => r.start <= nowMinutes && nowMinutes < r.end);
   if (!current) {
-    return { reason: 'За графіком зараз світло має бути' };
+    return null;
   }
-
-  let at = current.end;
-  if (at >= MINUTES_PER_DAY && tomorrow?.status === ScheduleStatus.Applies) {
+  if (current.end >= MINUTES_PER_DAY && tomorrow?.status === ScheduleStatus.Applies) {
     const continuation = outageRanges(tomorrow.slots).find(r => r.start === 0);
     if (continuation) {
-      at = MINUTES_PER_DAY + continuation.end;
+      return MINUTES_PER_DAY + continuation.end;
     }
   }
-  return { at };
+  return current.end;
+}
+
+/**
+ * When the next scheduled outage starts, in minutes since today's midnight
+ * (past a day when it is tomorrow); null when none is scheduled.
+ */
+export function scheduledTurnOff(
+  today: ScheduleDay | null,
+  tomorrow: ScheduleDay | null,
+  nowMinutes: number,
+): number | null {
+  if (today?.status === ScheduleStatus.Applies) {
+    const next = outageRanges(today.slots).find(r => r.start > nowMinutes);
+    if (next) {
+      return next.start;
+    }
+  }
+  if (tomorrow?.status === ScheduleStatus.Applies) {
+    // an outage running on from today's last slot is not a new turn-off
+    const runsPastMidnight = today ? outageRanges(today.slots).some(r => r.end >= MINUTES_PER_DAY) : false;
+    const next = outageRanges(tomorrow.slots).find(r => !(r.start === 0 && runsPastMidnight));
+    if (next) {
+      return MINUTES_PER_DAY + next.start;
+    }
+  }
+  return null;
 }
