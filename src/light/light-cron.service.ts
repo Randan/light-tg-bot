@@ -4,6 +4,7 @@ import { ConfigService } from '@nestjs/config';
 import { LoggerService, NotifyAdminService } from '@randan/tg-logger';
 import * as cron from 'node-cron';
 
+import { LightScheduleService } from './light-schedule.service';
 import { LightStatusService } from './light-status.service';
 import { LightTuyaService } from './light-tuya.service';
 import { isNetworkAvailable } from './network.util';
@@ -28,6 +29,7 @@ export class LightCronService implements OnModuleInit, OnApplicationBootstrap {
     private readonly config: ConfigService,
     private readonly tuya: LightTuyaService,
     private readonly status: LightStatusService,
+    private readonly schedule: LightScheduleService,
     private readonly logger: LoggerService,
     private readonly notifyAdmin: NotifyAdminService,
   ) {}
@@ -83,7 +85,8 @@ export class LightCronService implements OnModuleInit, OnApplicationBootstrap {
       }
 
       this.logger.log(`[CRON] Status changed: ${lastHistoryEntry?.status ?? 'none'} -> ${isOnline}`);
-      await this.status.applyStatusChange(deviceId, isOnline, lastHistoryEntry?.timestamp ?? null);
+      const scheduleLine = await this.describeScheduleSafely(isOnline);
+      await this.status.applyStatusChange(deviceId, isOnline, lastHistoryEntry?.timestamp ?? null, scheduleLine);
       return 'changed';
     } catch (err) {
       this.logger.error('[CRON] Error in pollDeviceStatus', err);
@@ -91,6 +94,16 @@ export class LightCronService implements OnModuleInit, OnApplicationBootstrap {
       return 'failed';
     } finally {
       this.running = false;
+    }
+  }
+
+  /** A schedule failure must not stop the power change from being announced. */
+  private async describeScheduleSafely(isPowerOn: boolean): Promise<string | null> {
+    try {
+      return await this.schedule.describeNextChange(isPowerOn);
+    } catch (err) {
+      this.logger.error('[CRON] Failed to describe the schedule', err);
+      return null;
     }
   }
 }

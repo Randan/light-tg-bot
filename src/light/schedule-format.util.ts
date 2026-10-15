@@ -10,6 +10,9 @@ export const ScheduleStatus = {
 
 const MINUTES_PER_DAY = 24 * 60;
 
+/** DTEK may cut the power a few minutes before the scheduled start. */
+const EARLY_CUT_TOLERANCE_MINUTES = 15;
+
 export interface ScheduleDay {
   date: string;
   group: string;
@@ -142,7 +145,9 @@ export function scheduledTurnOn(
   if (today?.status !== ScheduleStatus.Applies) {
     return null;
   }
-  const current = outageRanges(today.slots).find(r => r.start <= nowMinutes && nowMinutes < r.end);
+  const current = outageRanges(today.slots).find(
+    r => r.start - EARLY_CUT_TOLERANCE_MINUTES <= nowMinutes && nowMinutes < r.end,
+  );
   if (!current) {
     return null;
   }

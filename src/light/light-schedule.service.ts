@@ -8,7 +8,17 @@ import * as cron from 'node-cron';
 
 import { LightStatusService } from './light-status.service';
 import type { ScheduleDay } from './schedule-format.util';
-import { describeChange, formatDate, zonedNow, zonedTomorrow } from './schedule-format.util';
+import {
+  describeChange,
+  formatDate,
+  formatDurationAfter,
+  formatMinutes,
+  scheduledTurnOff,
+  scheduledTurnOn,
+  ScheduleStatus,
+  zonedNow,
+  zonedTomorrow,
+} from './schedule-format.util';
 import { OutageSchedule } from './schemas/outage-schedule.schema';
 import type { YasnoDay } from './yasno.service';
 import { YasnoService } from './yasno.service';
@@ -74,6 +84,30 @@ export class LightScheduleService implements OnModuleInit, OnApplicationBootstra
     const tz = this.timeZone();
     const [today, tomorrow] = await Promise.all([this.getLatest(zonedNow(tz).date), this.getLatest(zonedTomorrow(tz))]);
     return { today, tomorrow };
+  }
+
+  /**
+   * One line on when the schedule changes the power next: the turn-off while
+   * it is on, the turn-on while it is off. Null when the schedule says nothing
+   * about it, so callers can leave the line out.
+   */
+  async describeNextChange(isPowerOn: boolean): Promise<string | null> {
+    if (!this.isConfigured()) {
+      return null;
+    }
+    const { today, tomorrow } = await this.getCurrent();
+    if (today?.status === ScheduleStatus.Emergency) {
+      return '🚨 Діють екстрені відключення, графік не діє';
+    }
+
+    const now = zonedNow(this.timeZone()).minutes;
+    const at = isPowerOn ? scheduledTurnOff(today, tomorrow, now) : scheduledTurnOn(today, tomorrow, now);
+    if (at === null) {
+      return null;
+    }
+    const action = isPowerOn ? 'вимкнуть' : 'мають увімкнути';
+    const day = at >= 24 * 60 ? ' завтра' : '';
+    return `За графіком ${action}${day} о ${formatMinutes(at % (24 * 60))} (через ${formatDurationAfter(at - now)})`;
   }
 
   async poll(): Promise<void> {
