@@ -6,11 +6,18 @@ export interface EnvConfig {
   DB_URL: string;
   DB_SUBSCRIPTIONS_COLLECTION: string;
   DB_HISTORY_COLLECTION: string;
+  DB_SCHEDULE_COLLECTION: string;
   TUYA_ACCESS_KEY: string;
   TUYA_SECRET_KEY: string;
   TUYA_BASE_URL: string;
   TUYA_DEVICE_ID: string;
   TUYA_POLL_INTERVAL_MINUTES: number;
+  YASNO_REGION_ID: string;
+  YASNO_DSO_ID: string;
+  YASNO_STREET_ID?: string;
+  YASNO_HOUSE_ID?: string;
+  YASNO_GROUP?: string;
+  YASNO_POLL_INTERVAL_MINUTES: number;
   TIMEZONE: string;
   LOG_LEVEL?: string;
 }
@@ -29,16 +36,16 @@ function requireKey(config: Record<string, unknown>, key: string): string {
 }
 
 /**
- * Minutes between Tuya polls. Trial Edition allows ~26k API calls a month:
- * every 3 min is ~15k calls in a 31-day month, leaving headroom for token refreshes.
+ * Minutes between polls, 1..59 (a cron step). Tuya Trial Edition allows ~26k
+ * API calls a month: every 3 min is ~15k calls in a 31-day month.
  */
-function parsePollInterval(raw: string | undefined): number {
+function parseMinutes(key: string, raw: string | undefined, fallback: number): number {
   if (raw === undefined) {
-    return 3;
+    return fallback;
   }
   const minutes = Number(raw);
   if (!Number.isInteger(minutes) || minutes < 1 || minutes > 59) {
-    throw new Error(`TUYA_POLL_INTERVAL_MINUTES must be an integer 1..59, got "${raw}"`);
+    throw new Error(`${key} must be an integer 1..59, got "${raw}"`);
   }
   return minutes;
 }
@@ -60,11 +67,26 @@ export function configValidationSchema(config: Record<string, unknown>): EnvConf
     DB_URL: dbMongooseUri,
     DB_SUBSCRIPTIONS_COLLECTION: get(config, 'DB_SUBSCRIPTIONS_COLLECTION') || 'light_subscriptions',
     DB_HISTORY_COLLECTION: get(config, 'DB_HISTORY_COLLECTION') || 'light_history',
+    DB_SCHEDULE_COLLECTION: get(config, 'DB_SCHEDULE_COLLECTION') || 'outage_schedules',
     TUYA_ACCESS_KEY: requireKey(config, 'TUYA_ACCESS_KEY'),
     TUYA_SECRET_KEY: requireKey(config, 'TUYA_SECRET_KEY'),
     TUYA_BASE_URL: get(config, 'TUYA_BASE_URL') || 'https://openapi.tuyaus.com',
     TUYA_DEVICE_ID: requireKey(config, 'TUYA_DEVICE_ID'),
-    TUYA_POLL_INTERVAL_MINUTES: parsePollInterval(get(config, 'TUYA_POLL_INTERVAL_MINUTES')),
+    TUYA_POLL_INTERVAL_MINUTES: parseMinutes(
+      'TUYA_POLL_INTERVAL_MINUTES',
+      get(config, 'TUYA_POLL_INTERVAL_MINUTES'),
+      3,
+    ),
+    YASNO_REGION_ID: get(config, 'YASNO_REGION_ID') || '25',
+    YASNO_DSO_ID: get(config, 'YASNO_DSO_ID') || '902',
+    YASNO_STREET_ID: get(config, 'YASNO_STREET_ID'),
+    YASNO_HOUSE_ID: get(config, 'YASNO_HOUSE_ID'),
+    YASNO_GROUP: get(config, 'YASNO_GROUP'),
+    YASNO_POLL_INTERVAL_MINUTES: parseMinutes(
+      'YASNO_POLL_INTERVAL_MINUTES',
+      get(config, 'YASNO_POLL_INTERVAL_MINUTES'),
+      10,
+    ),
     TIMEZONE: requireKey(config, 'TIMEZONE'),
     LOG_LEVEL: get(config, 'LOG_LEVEL'),
   };

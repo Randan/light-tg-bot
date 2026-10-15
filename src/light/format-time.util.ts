@@ -1,4 +1,4 @@
-function getForm(count: number, one: string, few: string, many: string): string {
+export function getForm(count: number, one: string, few: string, many: string): string {
   const mod100 = count % 100;
   if (mod100 >= 11 && mod100 <= 14) {
     return many;

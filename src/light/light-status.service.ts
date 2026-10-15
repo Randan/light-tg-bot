@@ -41,11 +41,15 @@ export class LightStatusService {
       ? `🟢 Світло увімкнене\nСвітла не було ${timeFormatted}`
       : `🔴 Світло вимкнене\nСвітло було ${timeFormatted}`;
 
+    await this.notifySubscribers(deviceId, message);
+  }
+
+  async notifySubscribers(deviceId: string, message: string): Promise<void> {
     const subscription = await this.subscriptionModel.findOne({ deviceId }).lean().exec();
     const chatIds = subscription?.chatIds ?? [];
 
     await Promise.all(chatIds.map(id => this.sendSafely(deviceId, id, message)));
-    this.logger.log(`[NOTIFY] Sent status change to ${chatIds.length} subscribers`);
+    this.logger.log(`[NOTIFY] Sent a message to ${chatIds.length} subscribers`);
   }
 
   /** Returns false when the chat was already subscribed. */

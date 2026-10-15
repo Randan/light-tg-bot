@@ -5,9 +5,19 @@ import type { Context } from 'telegraf';
 
 import { formatTime } from './format-time.util';
 import { LightCronService } from './light-cron.service';
+import { LightScheduleService } from './light-schedule.service';
 import { LightStatisticsService } from './light-statistics.service';
 import { LightStatusService } from './light-status.service';
 import { LightTuyaService } from './light-tuya.service';
+import type { ScheduleDay } from './schedule-format.util';
+import {
+  describeDay,
+  formatDate,
+  formatDurationAfter,
+  formatMinutes,
+  scheduledTurnOn,
+  zonedNow,
+} from './schedule-format.util';
 
 const HELP_TEXT =
   '👋 *Вітаю!*\n\n' +
@@ -17,7 +27,8 @@ const HELP_TEXT =
   '/start - підписатися на сповіщення про світло\n' +
   '/stop - відписатися\n\n' +
   '🔍 *Перевірка статусу:*\n' +
-  '/status - чи є світло зараз\n\n' +
+  '/status - чи є світло зараз\n' +
+  '/schedule - графік відключень ДТЕК на сьогодні й завтра\n\n' +
   '📊 *Статистика відключень:*\n' +
   '/stats - статистика по періодах (сьогодні, тиждень, місяць тощо)\n\n' +
   'ℹ️ *Допомога:*\n' +
@@ -35,6 +46,7 @@ export class LightHandler {
     private readonly cron: LightCronService,
     private readonly statistics: LightStatisticsService,
     private readonly tuya: LightTuyaService,
+    private readonly schedule: LightScheduleService,
     private readonly logger: LoggerService,
     private readonly notifyAdmin: NotifyAdminService,
   ) {}
@@ -110,6 +122,9 @@ export class LightHandler {
 
       const since = formatTime(Date.now() - new Date(lastHistoryEntry.timestamp).getTime());
       const lines = [lastHistoryEntry.status ? `🟢 Світло є\n${since}` : `🔴 Світла немає\n${since}`];
+      if (!lastHistoryEntry.status && this.schedule.isConfigured()) {
+        lines.push(await this.describeScheduledTurnOn());
+      }
 
       const lastCheck = this.cron.getLastCheck();
       const staleAfterMs = this.cron.getPollIntervalMinutes() * STALE_CHECK_INTERVALS * 60 * 1000;
@@ -162,6 +177,21 @@ export class LightHandler {
     await ctx.telegram.sendMessage(chatId, message);
   }
 
+  @Command('schedule')
+  async scheduleCommand(@Ctx() ctx: Context): Promise<void> {
+    const chatId = ctx.chat?.id;
+    if (!chatId) {
+      return;
+    }
+
+    try {
+      await ctx.telegram.sendMessage(chatId, await this.describeSchedule());
+    } catch (err) {
+      this.logger.error('Failed to describe the schedule', err);
+      await ctx.telegram.sendMessage(chatId, 'Помилка при отриманні графіка');
+    }
+  }
+
   @Command('stats')
   async stats(@Ctx() ctx: Context): Promise<void> {
     const chatId = ctx.chat?.id;
@@ -179,6 +209,72 @@ export class LightHandler {
       await ctx.telegram.sendMessage(chatId, 'Помилка при отриманні статистики');
       this.notifyAdmin.send(`🚨 Stats failed: ${err instanceof Error ? err.message : String(err)}`);
     }
+  }
+
+  private async describeScheduledTurnOn(): Promise<string> {
+    const { today, tomorrow } = await this.schedule.getCurrent();
+    const now = zonedNow(this.timeZone()).minutes;
+    const turnOn = scheduledTurnOn(today, tomorrow, now);
+    if ('reason' in turnOn) {
+      return turnOn.reason;
+    }
+    const day = turnOn.at >= 24 * 60 ? ' завтра' : '';
+    return `За графіком мають увімкнути${day} о ${formatMinutes(turnOn.at % (24 * 60))} (через ${formatDurationAfter(turnOn.at - now)})`;
+  }
+
+  /** Everything known about the schedule right now; says so plainly when nothing is. */
+  private async describeSchedule(): Promise<string> {
+    if (!this.schedule.isConfigured()) {
+      return 'Графік відключень не налаштовано: не вказано адресу.';
+    }
+
+    const { today, tomorrow } = await this.schedule.getCurrent();
+    const lastPoll = this.schedule.getLastPoll();
+    const lastSuccessAt = this.schedule.getLastSuccessAt();
+
+    if (!today && !tomorrow) {
+      const reason = lastPoll?.error ? `YASNO не відповідає (${lastPoll.error})` : 'дані від YASNO ще не отримано';
+      return `Немає інформації про графік: ${reason}.`;
+    }
+
+    const group = (today ?? tomorrow)!.group;
+    const describe = (title: string, day: ScheduleDay | null) => `${title}:\n${day ? describeDay(day) : 'Немає даних'}`;
+    const tz = this.timeZone();
+    const lines = [
+      `📅 Графік відключень ДТЕК (група ${group})`,
+      '',
+      describe(`Сьогодні (${formatDate(zonedNow(tz).date)})`, today),
+      '',
+      describe(`Завтра${tomorrow ? ` (${formatDate(tomorrow.date)})` : ''}`, tomorrow),
+      '',
+    ];
+
+    const updatedOn = (tomorrow ?? today)?.updatedOn;
+    if (updatedOn) {
+      lines.push(`Оновлено YASNO: ${this.formatDateTime(updatedOn)}`);
+    }
+    const staleAfterMs = this.schedule.getPollIntervalMinutes() * STALE_CHECK_INTERVALS * 60 * 1000;
+    if (!lastSuccessAt || Date.now() - lastSuccessAt.getTime() > staleAfterMs) {
+      lines.push('⚠️ Не вдається отримати свіжі дані від YASNO, показую останні збережені');
+    } else {
+      lines.push(`Перевірено: ${this.formatDateTime(lastSuccessAt)}`);
+    }
+
+    return lines.join('\n');
+  }
+
+  private formatDateTime(date: Date): string {
+    return new Date(date).toLocaleString('uk-UA', {
+      timeZone: this.timeZone(),
+      day: '2-digit',
+      month: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit',
+    });
+  }
+
+  private timeZone(): string {
+    return this.config.get<string>('TIMEZONE') || 'Europe/Kyiv';
   }
 
   private getDeviceId(): string {
