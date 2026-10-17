@@ -102,7 +102,15 @@ export class YasnoService {
       signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
     });
     if (!response.ok) {
-      throw new Error(`YASNO ${path} responded ${response.status}`);
+      // YASNO explains a 404 in the body, e.g. "House 1 not found in RegionId 25 ..."
+      const body = await response.text().catch(() => '');
+      let detail = '';
+      try {
+        detail = (JSON.parse(body) as { detail?: string }).detail ?? '';
+      } catch {
+        // not JSON: an Incapsula challenge page or similar
+      }
+      throw new Error(`YASNO ${path} responded ${response.status}${detail ? `: ${detail}` : ''}`);
     }
     return (await response.json()) as T;
   }

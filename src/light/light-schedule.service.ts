@@ -117,24 +117,48 @@ export class LightScheduleService implements OnModuleInit, OnApplicationBootstra
     this.running = true;
 
     try {
-      const group = await this.yasno.resolveGroup();
+      const { group, warning } = await this.resolveGroup();
       const schedule = await this.yasno.getGroupSchedule(group);
 
       await this.storeIfChanged('сьогодні', schedule.today, group, schedule.updatedOn);
       await this.storeIfChanged('завтра', schedule.tomorrow, group, schedule.updatedOn);
 
-      this.lastPoll = { at: new Date(), error: null };
+      this.lastPoll = { at: new Date(), error: warning };
       this.lastSuccessAt = this.lastPoll.at;
+      if (warning) {
+        this.reportError(warning);
+      }
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       this.lastPoll = { at: new Date(), error: message };
-      this.logger.error('[YASNO] Schedule poll failed', message);
-      if (Date.now() - this.lastErrorNotifiedAt >= ERROR_NOTIFY_INTERVAL_MS) {
-        this.lastErrorNotifiedAt = Date.now();
-        this.notifyAdmin.send(`🚨 YASNO schedule poll failed: ${message}`);
-      }
+      this.reportError(message);
     } finally {
       this.running = false;
+    }
+  }
+
+  /**
+   * The group lookup by address is a separate YASNO call that can fail on its
+   * own; the schedule itself is still worth fetching for the last known group.
+   */
+  private async resolveGroup(): Promise<{ group: string; warning: string | null }> {
+    try {
+      return { group: await this.yasno.resolveGroup(), warning: null };
+    } catch (err) {
+      const last = await this.scheduleModel.findOne().sort({ fetchedAt: -1 }).select('group').lean().exec();
+      if (!last) {
+        throw err;
+      }
+      const message = err instanceof Error ? err.message : String(err);
+      return { group: last.group, warning: `${message} (using the last known group ${last.group})` };
+    }
+  }
+
+  private reportError(message: string): void {
+    this.logger.error('[YASNO] Schedule poll failed', message);
+    if (Date.now() - this.lastErrorNotifiedAt >= ERROR_NOTIFY_INTERVAL_MS) {
+      this.lastErrorNotifiedAt = Date.now();
+      this.notifyAdmin.send(`🚨 YASNO schedule poll failed: ${message}`);
     }
   }
 
