@@ -117,17 +117,14 @@ export class LightScheduleService implements OnModuleInit, OnApplicationBootstra
     this.running = true;
 
     try {
-      const { group, warning } = await this.resolveGroup();
+      const group = await this.resolveGroup();
       const schedule = await this.yasno.getGroupSchedule(group);
 
       await this.storeIfChanged('сьогодні', schedule.today, group, schedule.updatedOn);
       await this.storeIfChanged('завтра', schedule.tomorrow, group, schedule.updatedOn);
 
-      this.lastPoll = { at: new Date(), error: warning };
+      this.lastPoll = { at: new Date(), error: null };
       this.lastSuccessAt = this.lastPoll.at;
-      if (warning) {
-        this.reportError(warning);
-      }
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       this.lastPoll = { at: new Date(), error: message };
@@ -138,20 +135,17 @@ export class LightScheduleService implements OnModuleInit, OnApplicationBootstra
   }
 
   /**
-   * The group lookup by address is a separate YASNO call that can fail on its
-   * own; the schedule itself is still worth fetching for the last known group.
+   * TEMPORARY: YASNO renumbered the houses on 2026-10-17 and the stored house id
+   * no longer resolves, so the group comes from YASNO_GROUP or the last stored
+   * schedule. The address lookup only runs on an empty database.
    */
-  private async resolveGroup(): Promise<{ group: string; warning: string | null }> {
-    try {
-      return { group: await this.yasno.resolveGroup(), warning: null };
-    } catch (err) {
-      const last = await this.scheduleModel.findOne().sort({ fetchedAt: -1 }).select('group').lean().exec();
-      if (!last) {
-        throw err;
-      }
-      const message = err instanceof Error ? err.message : String(err);
-      return { group: last.group, warning: `${message} (using the last known group ${last.group})` };
+  private async resolveGroup(): Promise<string> {
+    const fixedGroup = this.config.get<string>('YASNO_GROUP');
+    if (fixedGroup) {
+      return fixedGroup;
     }
+    const last = await this.scheduleModel.findOne().sort({ fetchedAt: -1 }).select('group').lean().exec();
+    return last?.group ?? this.yasno.resolveGroup();
   }
 
   private reportError(message: string): void {
