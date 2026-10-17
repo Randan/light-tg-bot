@@ -1,11 +1,11 @@
-import type { OnApplicationBootstrap, OnModuleInit } from '@nestjs/common';
+import type { OnApplicationBootstrap, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
 import { Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { InjectModel } from '@nestjs/mongoose';
 import { LoggerService, NotifyAdminService } from '@randan/tg-logger';
 import type { Model } from 'mongoose';
-import * as cron from 'node-cron';
 
+import { FailureAlert } from './failure-alert.util';
 import { LightStatusService } from './light-status.service';
 import type { ScheduleDay } from './schedule-format.util';
 import {
@@ -23,8 +23,8 @@ import { OutageSchedule } from './schemas/outage-schedule.schema';
 import type { YasnoDay } from './yasno.service';
 import { YasnoService } from './yasno.service';
 
-/** Do not notify the admin about the same ongoing YASNO failure more than once per hour. */
-const ERROR_NOTIFY_INTERVAL_MS = 60 * 60 * 1000;
+/** A schedule last fetched more than this many poll intervals ago may be out of date. */
+const STALE_AFTER_INTERVALS = 3;
 
 export interface SchedulePoll {
   at: Date;
@@ -32,11 +32,12 @@ export interface SchedulePoll {
 }
 
 @Injectable()
-export class LightScheduleService implements OnModuleInit, OnApplicationBootstrap {
+export class LightScheduleService implements OnModuleInit, OnApplicationBootstrap, OnModuleDestroy {
   private lastPoll: SchedulePoll | null = null;
   private lastSuccessAt: Date | null = null;
-  private lastErrorNotifiedAt = 0;
   private running = false;
+  private timer: NodeJS.Timeout | null = null;
+  private readonly alert: FailureAlert;
 
   constructor(
     private readonly config: ConfigService,
@@ -44,8 +45,10 @@ export class LightScheduleService implements OnModuleInit, OnApplicationBootstra
     @InjectModel(OutageSchedule.name) private readonly scheduleModel: Model<OutageSchedule>,
     private readonly status: LightStatusService,
     private readonly logger: LoggerService,
-    private readonly notifyAdmin: NotifyAdminService,
-  ) {}
+    notifyAdmin: NotifyAdminService,
+  ) {
+    this.alert = new FailureAlert(message => notifyAdmin.send(message), '✅ YASNO знову віддає графік');
+  }
 
   onModuleInit(): void {
     if (!this.yasno.isConfigured()) {
@@ -53,8 +56,14 @@ export class LightScheduleService implements OnModuleInit, OnApplicationBootstra
       return;
     }
     const interval = this.getPollIntervalMinutes();
-    cron.schedule(`*/${interval} * * * *`, () => this.poll(), { timezone: this.timeZone() });
-    this.logger.log(`YASNO schedule cron registered (every ${interval} minutes)`);
+    this.timer = setInterval(() => void this.poll(), interval * 60 * 1000);
+    this.logger.log(`YASNO schedule polling registered (every ${interval} minutes)`);
+  }
+
+  onModuleDestroy(): void {
+    if (this.timer) {
+      clearInterval(this.timer);
+    }
   }
 
   onApplicationBootstrap(): void {
@@ -79,6 +88,12 @@ export class LightScheduleService implements OnModuleInit, OnApplicationBootstra
     return this.lastSuccessAt;
   }
 
+  /** Whether the stored schedule was confirmed by YASNO recently enough to rely on. */
+  isFresh(): boolean {
+    const staleAfterMs = this.getPollIntervalMinutes() * STALE_AFTER_INTERVALS * 60 * 1000;
+    return this.lastSuccessAt !== null && Date.now() - this.lastSuccessAt.getTime() <= staleAfterMs;
+  }
+
   /** The current schedule for today and tomorrow (Kyiv dates), as last stored. */
   async getCurrent(): Promise<{ today: ScheduleDay | null; tomorrow: ScheduleDay | null }> {
     const tz = this.timeZone();
@@ -89,10 +104,11 @@ export class LightScheduleService implements OnModuleInit, OnApplicationBootstra
   /**
    * One line on when the schedule changes the power next: the turn-off while
    * it is on, the turn-on while it is off. Null when the schedule says nothing
-   * about it, so callers can leave the line out.
+   * about it or the stored schedule may be out of date, so callers can leave
+   * the line out.
    */
   async describeNextChange(isPowerOn: boolean): Promise<string | null> {
-    if (!this.isConfigured()) {
+    if (!this.isConfigured() || !this.isFresh()) {
       return null;
     }
     const { today, tomorrow } = await this.getCurrent();
@@ -125,34 +141,38 @@ export class LightScheduleService implements OnModuleInit, OnApplicationBootstra
 
       this.lastPoll = { at: new Date(), error: null };
       this.lastSuccessAt = this.lastPoll.at;
+      this.alert.ok();
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       this.lastPoll = { at: new Date(), error: message };
-      this.reportError(message);
+      this.logger.error('[YASNO] Schedule poll failed', message);
+      this.alert.fail(`🚨 YASNO schedule poll failed: ${message}`);
     } finally {
       this.running = false;
     }
   }
 
   /**
-   * TEMPORARY: YASNO renumbered the houses on 2026-10-17 and the stored house id
-   * no longer resolves, so the group comes from YASNO_GROUP or the last stored
-   * schedule. The address lookup only runs on an empty database.
+   * YASNO_GROUP wins. Otherwise the group is looked up by address, so a building
+   * moved to another group is noticed; when the lookup fails (YASNO renumbered
+   * the houses on 2026-10-17 and the stored house id stopped resolving) the
+   * last stored group is used without alerting the admin on every poll.
    */
   private async resolveGroup(): Promise<string> {
     const fixedGroup = this.config.get<string>('YASNO_GROUP');
     if (fixedGroup) {
       return fixedGroup;
     }
-    const last = await this.scheduleModel.findOne().sort({ fetchedAt: -1 }).select('group').lean().exec();
-    return last?.group ?? this.yasno.resolveGroup();
-  }
-
-  private reportError(message: string): void {
-    this.logger.error('[YASNO] Schedule poll failed', message);
-    if (Date.now() - this.lastErrorNotifiedAt >= ERROR_NOTIFY_INTERVAL_MS) {
-      this.lastErrorNotifiedAt = Date.now();
-      this.notifyAdmin.send(`🚨 YASNO schedule poll failed: ${message}`);
+    try {
+      return await this.yasno.resolveGroup();
+    } catch (err) {
+      const last = await this.scheduleModel.findOne().sort({ fetchedAt: -1 }).select('group').lean().exec();
+      if (!last) {
+        throw err;
+      }
+      const message = err instanceof Error ? err.message : String(err);
+      this.logger.warn(`[YASNO] Group lookup failed, using the last stored group ${last.group}: ${message}`);
+      return last.group;
     }
   }
 

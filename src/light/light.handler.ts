@@ -158,6 +158,9 @@ export class LightHandler {
           ? `${state}
 Статус змінився, записано в історію`
           : state;
+    } else if (outcome === 'pending') {
+      const state = lastCheck?.status ? '🟢 Розетка онлайн' : '🔴 Розетка офлайн';
+      message = `${state}, але це ще не підтверджено: зміну буде записано, якщо наступна перевірка покаже те саме`;
     } else if (outcome === 'unknown') {
       message = `⚠️ Tuya не відповіла: ${this.tuya.getLastError() ?? 'невідома помилка'}`;
     } else if (outcome === 'busy') {
@@ -213,7 +216,6 @@ export class LightHandler {
 
     const { today, tomorrow } = await this.schedule.getCurrent();
     const lastPoll = this.schedule.getLastPoll();
-    const lastSuccessAt = this.schedule.getLastSuccessAt();
 
     if (!today && !tomorrow) {
       const reason = lastPoll?.error ? `YASNO не відповідає (${lastPoll.error})` : 'дані від YASNO ще не отримано';
@@ -236,11 +238,11 @@ export class LightHandler {
     if (updatedOn) {
       lines.push(`Оновлено YASNO: ${this.formatDateTime(updatedOn)}`);
     }
-    const staleAfterMs = this.schedule.getPollIntervalMinutes() * STALE_CHECK_INTERVALS * 60 * 1000;
-    if (!lastSuccessAt || Date.now() - lastSuccessAt.getTime() > staleAfterMs) {
-      lines.push('⚠️ Не вдається отримати свіжі дані від YASNO, показую останні збережені');
-    } else {
+    const lastSuccessAt = this.schedule.getLastSuccessAt();
+    if (lastSuccessAt && this.schedule.isFresh()) {
       lines.push(`Перевірено: ${this.formatDateTime(lastSuccessAt)}`);
+    } else {
+      lines.push('⚠️ Не вдається отримати свіжі дані від YASNO, показую останні збережені');
     }
 
     return lines.join('\n');

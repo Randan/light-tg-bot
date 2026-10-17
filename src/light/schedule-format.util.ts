@@ -47,6 +47,47 @@ export function zonedNow(timeZone: string, now = new Date()): { date: string; mi
   };
 }
 
+/** The calendar day in the given time zone; weekday 0 is Monday. */
+export function zonedCalendar(
+  timeZone: string,
+  now = new Date(),
+): { year: number; month: number; day: number; weekday: number } {
+  const [year, month, day] = zonedNow(timeZone, now).date.split('-').map(Number);
+  const weekday = (new Date(Date.UTC(year, month - 1, day)).getUTCDay() + 6) % 7;
+  return { year, month, day, weekday };
+}
+
+/** How far the zone's wall clock is ahead of UTC at the given moment. */
+function zoneOffsetMs(timeZone: string, at: Date): number {
+  const parts = Object.fromEntries(
+    new Intl.DateTimeFormat('en-CA', {
+      timeZone,
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit',
+      hourCycle: 'h23',
+    })
+      .formatToParts(at)
+      .map(part => [part.type, Number(part.value)]),
+  );
+  const wallClock = Date.UTC(parts.year, parts.month - 1, parts.day, parts.hour, parts.minute, parts.second);
+  return wallClock - Math.floor(at.getTime() / 1000) * 1000;
+}
+
+/**
+ * The moment the given day starts in the time zone. Out-of-range values roll
+ * over like Date.UTC: day 0 is the last day of the previous month.
+ */
+export function zonedMidnight(timeZone: string, year: number, month: number, day: number): Date {
+  const wallClock = Date.UTC(year, month - 1, day);
+  const guess = wallClock - zoneOffsetMs(timeZone, new Date(wallClock));
+  // recheck at the guess: the offset differs across a DST switch
+  return new Date(wallClock - zoneOffsetMs(timeZone, new Date(guess)));
+}
+
 export function zonedTomorrow(timeZone: string, now = new Date()): string {
   return zonedNow(timeZone, new Date(now.getTime() + MINUTES_PER_DAY * 60 * 1000)).date;
 }

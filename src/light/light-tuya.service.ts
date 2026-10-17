@@ -3,6 +3,8 @@ import { ConfigService } from '@nestjs/config';
 import { LoggerService, NotifyAdminService } from '@randan/tg-logger';
 import { TuyaContext } from '@tuya/tuya-connector-nodejs';
 
+import { FailureAlert } from './failure-alert.util';
+
 /** Response from tuya.device.detail() - Get Device Information API /v1.0/iot-03/devices/{id} */
 interface TuyaDeviceDetailResponse {
   success?: boolean;
@@ -15,20 +17,33 @@ interface TuyaDeviceDetailResponse {
   };
 }
 
-/** Do not notify the admin about the same ongoing API failure more than once per hour. */
-const API_ERROR_NOTIFY_INTERVAL_MS = 60 * 60 * 1000;
+/**
+ * The connector uses axios without a timeout: a request Tuya never answers
+ * would hang the poll forever and stop the power tracking until a restart.
+ */
+const REQUEST_TIMEOUT_MS = 20_000;
+
+function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
+  let timer: NodeJS.Timeout | undefined;
+  const timeout = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => reject(new Error(`no answer in ${ms / 1000}s`)), ms);
+  });
+  return Promise.race([promise, timeout]).finally(() => clearTimeout(timer));
+}
 
 @Injectable()
 export class LightTuyaService {
-  private lastApiErrorNotifiedAt = 0;
   private client: TuyaContext | null = null;
   private lastError: string | null = null;
+  private readonly alert: FailureAlert;
 
   constructor(
     private readonly config: ConfigService,
     private readonly logger: LoggerService,
-    private readonly notifyAdmin: NotifyAdminService,
-  ) {}
+    notifyAdmin: NotifyAdminService,
+  ) {
+    this.alert = new FailureAlert(message => notifyAdmin.send(message), '✅ Tuya API відповідає знову');
+  }
 
   /**
    * Whether the device is online (= the power is on).
@@ -37,28 +52,39 @@ export class LightTuyaService {
    */
   async isDeviceOnline(deviceId: string): Promise<boolean | null> {
     try {
-      const deviceInfo = (await this.getClient().device.detail({
-        device_id: deviceId,
-      })) as unknown as TuyaDeviceDetailResponse;
+      const deviceInfo = (await withTimeout(
+        this.getClient().device.detail({ device_id: deviceId }),
+        REQUEST_TIMEOUT_MS,
+      )) as unknown as TuyaDeviceDetailResponse;
 
       if (deviceInfo.success === false) {
         // e.g. code 28841002 "IoT Core service subscription has expired"
         const detail = `code=${deviceInfo.code ?? '?'} msg=${deviceInfo.msg ?? '?'}`;
         this.logger.error(`[TUYA API] Request rejected for ${deviceId}: ${detail}`);
         this.lastError = detail;
-        this.notifyApiError(`🚨 Tuya API rejected the request (${deviceId}): ${detail}`);
+        this.alert.fail(`🚨 Tuya API rejected the request (${deviceId}): ${detail}`);
         return null;
       }
 
-      const online = deviceInfo.result?.online === true || deviceInfo.result?.result?.online === true;
+      // A missing flag is an unknown answer, not "offline"
+      const online = deviceInfo.result?.online ?? deviceInfo.result?.result?.online;
+      if (typeof online !== 'boolean') {
+        const detail = 'no online flag in the response';
+        this.logger.error(`[TUYA API] ${detail} for ${deviceId}: ${JSON.stringify(deviceInfo).slice(0, 500)}`);
+        this.lastError = detail;
+        this.alert.fail(`🚨 Tuya API answered without the device state (${deviceId})`);
+        return null;
+      }
+
       this.logger.log(`[TUYA API] Device ${deviceId} is ${online ? 'online = light is ON' : 'offline = no light'}`);
       this.lastError = null;
+      this.alert.ok();
       return online;
     } catch (error) {
       this.logger.error(`Error fetching device status for ${deviceId}:`, error);
       const err = error instanceof Error ? error : new Error(String(error));
       this.lastError = err.message;
-      this.notifyApiError(`🚨 Tuya API error (${deviceId}): ${err.message}`);
+      this.alert.fail(`🚨 Tuya API error (${deviceId}): ${err.message}`);
       return null;
     }
   }
@@ -84,14 +110,5 @@ export class LightTuyaService {
       this.client = new TuyaContext({ accessKey, secretKey, baseUrl });
     }
     return this.client;
-  }
-
-  private notifyApiError(message: string): void {
-    const now = Date.now();
-    if (now - this.lastApiErrorNotifiedAt < API_ERROR_NOTIFY_INTERVAL_MS) {
-      return;
-    }
-    this.lastApiErrorNotifiedAt = now;
-    this.notifyAdmin.send(message);
   }
 }

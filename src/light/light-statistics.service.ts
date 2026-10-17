@@ -1,9 +1,11 @@
 import { Injectable } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { InjectModel } from '@nestjs/mongoose';
 import { LoggerService } from '@randan/tg-logger';
 import type { Model } from 'mongoose';
 
 import { formatTime } from './format-time.util';
+import { zonedCalendar, zonedMidnight } from './schedule-format.util';
 import { LightHistory } from './schemas/light-history.schema';
 
 type PeriodKey =
@@ -29,18 +31,6 @@ function formatDays(n: number): string {
     return `${n} дні`;
   }
   return `${n} днів`;
-}
-
-function startOfThisWeek(now: Date): Date {
-  const d = new Date(now);
-  d.setDate(d.getDate() - ((d.getDay() + 6) % 7));
-  d.setHours(0, 0, 0, 0);
-  return d;
-}
-
-function dayOfYear(now: Date): number {
-  const start = new Date(now.getFullYear(), 0, 0);
-  return Math.floor((now.getTime() - start.getTime()) / (24 * 60 * 60 * 1000));
 }
 
 interface HistoryEntry {
@@ -82,6 +72,7 @@ export class LightStatisticsService {
   constructor(
     @InjectModel(LightHistory.name)
     private readonly historyModel: Model<LightHistory>,
+    private readonly config: ConfigService,
     private readonly logger: LoggerService,
   ) {}
 
@@ -90,13 +81,17 @@ export class LightStatisticsService {
     const firstEntry = await this.historyModel.findOne().sort({ timestamp: 1 }).lean().exec();
     const firstEntryTs = firstEntry ? new Date(firstEntry.timestamp) : now;
 
-    const weekStart = startOfThisWeek(now);
-    const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
-    const yearStart = new Date(now.getFullYear(), 0, 1);
-    const lastWeekStart = new Date(weekStart);
-    lastWeekStart.setDate(lastWeekStart.getDate() - 7);
-    const lastMonthStart = new Date(now.getFullYear(), now.getMonth() - 1, 1);
-    const lastYearStart = new Date(now.getFullYear() - 1, 0, 1);
+    // period boundaries follow TIMEZONE, like the schedule, not the server's clock
+    const tz = this.config.get<string>('TIMEZONE') || 'Europe/Kyiv';
+    const { year, month, day, weekday } = zonedCalendar(tz, now);
+    const dayStart = zonedMidnight(tz, year, month, day);
+    const weekStart = zonedMidnight(tz, year, month, day - weekday);
+    const lastWeekStart = zonedMidnight(tz, year, month, day - weekday - 7);
+    const monthStart = zonedMidnight(tz, year, month, 1);
+    const lastMonthStart = zonedMidnight(tz, year, month - 1, 1);
+    const yearStart = zonedMidnight(tz, year, 1, 1);
+    const lastYearStart = zonedMidnight(tz, year - 1, 1, 1);
+    const dayOfYear = Math.round((Date.UTC(year, month - 1, day) - Date.UTC(year, 0, 1)) / (24 * 60 * 60 * 1000)) + 1;
 
     const periods: {
       key: PeriodKey;
@@ -108,11 +103,7 @@ export class LightStatisticsService {
     }[] = [
       {
         key: 'day',
-        getStart: n => {
-          const d = new Date(n);
-          d.setHours(0, 0, 0, 0);
-          return d;
-        },
+        getStart: () => new Date(dayStart),
         getEnd: n => new Date(n),
         endInclusive: true,
         getLabel: () => 'за сьогодні',
@@ -123,10 +114,7 @@ export class LightStatisticsService {
         getStart: () => new Date(weekStart),
         getEnd: n => new Date(n),
         endInclusive: true,
-        getLabel: n => {
-          const daysPassed = ((n.getDay() + 6) % 7) + 1;
-          return `цей тиждень (${formatDays(daysPassed)})`;
-        },
+        getLabel: () => `цей тиждень (${formatDays(weekday + 1)})`,
         shouldShow: () => true,
       },
       {
@@ -142,8 +130,8 @@ export class LightStatisticsService {
         getStart: () => new Date(monthStart),
         getEnd: n => new Date(n),
         endInclusive: true,
-        getLabel: n => `цей місяць (${formatDays(n.getDate())})`,
-        shouldShow: n => n.getDate() >= 7,
+        getLabel: () => `цей місяць (${formatDays(day)})`,
+        shouldShow: () => day >= 7,
       },
       {
         key: 'month_prev',
@@ -158,8 +146,8 @@ export class LightStatisticsService {
         getStart: () => new Date(yearStart),
         getEnd: n => new Date(n),
         endInclusive: true,
-        getLabel: n => `цей рік (${formatDays(dayOfYear(n))})`,
-        shouldShow: n => dayOfYear(n) >= 7,
+        getLabel: () => `цей рік (${formatDays(dayOfYear)})`,
+        shouldShow: () => dayOfYear >= 7,
       },
       {
         key: 'year_prev',

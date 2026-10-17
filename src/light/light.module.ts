@@ -57,5 +57,6 @@ import { YasnoService } from './yasno.service';
     LightScheduleService,
     LightHandler,
   ],
+  exports: [LightCronService],
 })
 export class LightModule {}

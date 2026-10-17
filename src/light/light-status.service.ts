@@ -31,10 +31,11 @@ export class LightStatusService {
   async applyStatusChange(
     deviceId: string,
     status: boolean,
+    changedAt: Date,
     previousChangeAt: Date | null,
     extraLine?: string | null,
   ): Promise<void> {
-    await this.historyModel.create({ timestamp: new Date(), status });
+    await this.historyModel.create({ timestamp: changedAt, status });
     this.logger.log(`[HISTORY] Added: light ${status ? 'ON' : 'OFF'}`);
 
     if (!previousChangeAt) {
@@ -42,7 +43,7 @@ export class LightStatusService {
       return;
     }
 
-    const timeFormatted = formatTime(Date.now() - new Date(previousChangeAt).getTime());
+    const timeFormatted = formatTime(changedAt.getTime() - new Date(previousChangeAt).getTime());
     const message = status
       ? `🟢 Світло увімкнене\nСвітла не було ${timeFormatted}`
       : `🔴 Світло вимкнене\nСвітло було ${timeFormatted}`;
@@ -77,10 +78,16 @@ export class LightStatusService {
     try {
       await this.bot.telegram.sendMessage(chatId, message);
     } catch (err) {
-      const code = (err as { response?: { error_code?: number } }).response?.error_code;
-      if (code === 403) {
+      const response = (err as { response?: { error_code?: number; description?: string } }).response;
+      // 403: blocked, kicked or a deleted account; 400 "chat not found": the chat is gone
+      const isGone =
+        response?.error_code === 403 ||
+        (response?.error_code === 400 && /chat not found/i.test(response.description ?? ''));
+      if (isGone) {
         await this.unsubscribe(deviceId, chatId);
-        this.logger.log(`[NOTIFY] Chat ${chatId} blocked the bot, unsubscribed`);
+        this.logger.log(
+          `[NOTIFY] Chat ${chatId} is unreachable (${response?.description ?? 'no reason'}), unsubscribed`,
+        );
         return;
       }
       this.logger.error(`Failed to send message to chat ${chatId}`, err);
