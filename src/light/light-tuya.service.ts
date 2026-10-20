@@ -35,6 +35,9 @@ function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
 export class LightTuyaService {
   private client: TuyaContext | null = null;
   private lastError: string | null = null;
+  /** Kept after a recovery, unlike lastError, so /diag can show what last went wrong. */
+  private lastFailure: { message: string; at: Date } | null = null;
+  private lastSuccessAt: Date | null = null;
   private readonly alert: FailureAlert;
 
   constructor(
@@ -62,6 +65,7 @@ export class LightTuyaService {
         const detail = `code=${deviceInfo.code ?? '?'} msg=${deviceInfo.msg ?? '?'}`;
         this.logger.error(`[TUYA API] Request rejected for ${deviceId}: ${detail}`);
         this.lastError = detail;
+        this.lastFailure = { message: detail, at: new Date() };
         this.alert.fail(`🚨 Tuya API rejected the request (${deviceId}): ${detail}`);
         return null;
       }
@@ -72,21 +76,29 @@ export class LightTuyaService {
         const detail = 'no online flag in the response';
         this.logger.error(`[TUYA API] ${detail} for ${deviceId}: ${JSON.stringify(deviceInfo).slice(0, 500)}`);
         this.lastError = detail;
+        this.lastFailure = { message: detail, at: new Date() };
         this.alert.fail(`🚨 Tuya API answered without the device state (${deviceId})`);
         return null;
       }
 
       this.logger.log(`[TUYA API] Device ${deviceId} is ${online ? 'online = light is ON' : 'offline = no light'}`);
       this.lastError = null;
+      this.lastSuccessAt = new Date();
       this.alert.ok();
       return online;
     } catch (error) {
       this.logger.error(`Error fetching device status for ${deviceId}:`, error);
       const err = error instanceof Error ? error : new Error(String(error));
       this.lastError = err.message;
+      this.lastFailure = { message: err.message, at: new Date() };
       this.alert.fail(`🚨 Tuya API error (${deviceId}): ${err.message}`);
       return null;
     }
+  }
+
+  /** For /diag: the last successful call and the last failure, which may be older. */
+  getHealth(): { lastSuccessAt: Date | null; lastFailure: { message: string; at: Date } | null } {
+    return { lastSuccessAt: this.lastSuccessAt, lastFailure: this.lastFailure };
   }
 
   /** Why the last Tuya call failed; null after a successful one. */

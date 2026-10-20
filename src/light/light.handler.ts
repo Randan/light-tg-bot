@@ -11,6 +11,7 @@ import { LightStatusService } from './light-status.service';
 import { LightTuyaService } from './light-tuya.service';
 import type { ScheduleDay } from './schedule-format.util';
 import { describeDay, formatDate, zonedNow } from './schedule-format.util';
+import { YasnoService } from './yasno.service';
 
 const HELP_TEXT =
   '👋 *Вітаю!*\n\n' +
@@ -40,6 +41,7 @@ export class LightHandler {
     private readonly statistics: LightStatisticsService,
     private readonly tuya: LightTuyaService,
     private readonly schedule: LightScheduleService,
+    private readonly yasno: YasnoService,
     private readonly logger: LoggerService,
     private readonly notifyAdmin: NotifyAdminService,
   ) {}
@@ -142,8 +144,7 @@ export class LightHandler {
   @Command('statusrequest')
   async statusRequest(@Ctx() ctx: Context): Promise<void> {
     const chatId = ctx.chat?.id;
-    const adminId = this.config.get<string>('ADMIN_TELEGRAM_ID');
-    if (!chatId || !adminId || String(ctx.from?.id) !== adminId) {
+    if (!chatId || !this.isAdmin(ctx)) {
       return;
     }
 
@@ -186,6 +187,26 @@ export class LightHandler {
     } catch (err) {
       this.logger.error('Failed to describe the schedule', err);
       await ctx.telegram.sendMessage(chatId, 'Помилка при отриманні графіка');
+    }
+  }
+
+  /**
+   * Admin-only and unlisted: everything needed to tell what is wrong without
+   * shell access to the server, e.g. from a cloud session or a phone.
+   */
+  @Command('diag')
+  async diag(@Ctx() ctx: Context): Promise<void> {
+    const chatId = ctx.chat?.id;
+    if (!chatId || !this.isAdmin(ctx)) {
+      return;
+    }
+    try {
+      await ctx.telegram.sendMessage(chatId, await this.describeDiagnostics());
+    } catch (err) {
+      await ctx.telegram.sendMessage(
+        chatId,
+        `Помилка діагностики: ${err instanceof Error ? err.message : String(err)}`,
+      );
     }
   }
 
@@ -246,6 +267,57 @@ export class LightHandler {
     }
 
     return lines.join('\n');
+  }
+
+  private async describeDiagnostics(): Promise<string> {
+    const at = (date: Date | null | undefined) => (date ? this.formatDateTime(date) : '—');
+    const failure = (f: { message: string; at: Date } | null) => (f ? `${at(f.at)}: ${f.message}` : '—');
+
+    const runtime = this.cron.getRuntime();
+    const lastCheck = this.cron.getLastCheck();
+    const tuya = this.tuya.getHealth();
+    const history = await this.lightStatus.getLastHistoryEntry();
+    const subscribers = await this.lightStatus.countSubscribers(this.getDeviceId());
+
+    const lines = [
+      '🔧 Діагностика',
+      `Версія: ${process.env.GIT_SHA || 'невідома'}, запущено ${at(runtime.startedAt)}`,
+      `Підписників: ${subscribers}`,
+      '',
+      `Tuya (кожні ${this.cron.getPollIntervalMinutes()} хв):`,
+      `  опитування ${this.cron.isPolling() ? 'працює' : '⚠️ ЗАВИСЛО'}, останній цикл ${at(runtime.lastRoundAt)}`,
+      `  остання відповідь: ${lastCheck ? `${lastCheck.status ? 'онлайн' : 'офлайн'} о ${at(lastCheck.checkedAt)}` : '—'}`,
+      `  непідтверджена зміна: ${runtime.pendingChange ? `${runtime.pendingChange.status ? 'онлайн' : 'офлайн'} з ${at(runtime.pendingChange.checkedAt)}` : 'немає'}`,
+      `  остання помилка: ${failure(tuya.lastFailure)}`,
+      `  в історії: ${history ? `${history.status ? 'світло є' : 'світла немає'} з ${at(history.timestamp)}` : '—'}`,
+    ];
+
+    if (this.schedule.isConfigured()) {
+      const group = this.schedule.getGroupInfo();
+      const address = this.yasno.getAddress();
+      const source = { env: 'з YASNO_GROUP', address: 'за адресою', stored: '⚠️ з бази, адреса не знаходиться' };
+      lines.push(
+        '',
+        `YASNO (кожні ${this.schedule.getPollIntervalMinutes()} хв):`,
+        `  адреса: ${this.config.get<string>('YASNO_STREET') ?? '—'}, ${this.config.get<string>('YASNO_HOUSE') ?? '—'}`,
+        `  id: ${address ? `вулиця ${address.streetId}, будинок ${address.houseId}` : '—'}`,
+        `  група: ${group ? `${group.group} (${source[group.source]})` : '—'}`,
+        `  останній успіх: ${at(this.schedule.getLastSuccessAt())}${this.schedule.isFresh() ? '' : ' ⚠️ застаріло'}`,
+        `  остання помилка: ${failure(this.schedule.getLastFailure())}`,
+      );
+      if (group?.error) {
+        lines.push(`  помилка пошуку групи: ${group.error}`);
+      }
+    } else {
+      lines.push('', 'YASNO: не налаштовано');
+    }
+
+    return lines.join('\n');
+  }
+
+  private isAdmin(ctx: Context): boolean {
+    const adminId = this.config.get<string>('ADMIN_TELEGRAM_ID');
+    return Boolean(adminId) && String(ctx.from?.id) === adminId;
   }
 
   private formatDateTime(date: Date): string {

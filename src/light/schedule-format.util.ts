@@ -152,21 +152,26 @@ export function describeDay(day: Pick<ScheduleDay, 'status' | 'slots'>): string 
 }
 
 export function describeChange(dayTitle: string, day: ScheduleDay, previous: ScheduleDay): string {
-  let header: string;
-  if (day.status === ScheduleStatus.Emergency && previous.status !== ScheduleStatus.Emergency) {
-    header = `🚨 Введено екстрені відключення — графік на ${dayTitle} не діє`;
-  } else if (previous.status === ScheduleStatus.Emergency) {
-    header = `✅ Екстрені відключення скасовано. Графік на ${dayTitle}:`;
-  } else if (previous.status === ScheduleStatus.Waiting) {
-    header = `📅 Опубліковано графік на ${dayTitle}:`;
-  } else {
-    header = `📅 Графік на ${dayTitle} змінився:`;
-  }
+  const lines: string[] = [];
+  const lifted = previous.status === ScheduleStatus.Emergency && day.status !== ScheduleStatus.Emergency;
 
-  const lines = [header];
-  if (day.status !== ScheduleStatus.Emergency) {
+  if (day.status === ScheduleStatus.Emergency) {
+    lines.push(`🚨 Введено екстрені відключення — графік на ${dayTitle} не діє`);
+  } else if (day.status === ScheduleStatus.Waiting) {
+    // no schedule to show: say so instead of "published: not published"
+    const waiting = `⏳ Графік на ${dayTitle} ще не опубліковано`;
+    lines.push(lifted ? `✅ Екстрені відключення скасовано. ${waiting}` : waiting);
+  } else {
+    if (lifted) {
+      lines.push(`✅ Екстрені відключення скасовано. Графік на ${dayTitle}:`);
+    } else if (previous.status === ScheduleStatus.Waiting) {
+      lines.push(`📅 Опубліковано графік на ${dayTitle}:`);
+    } else {
+      lines.push(`📅 Графік на ${dayTitle} змінився:`);
+    }
     lines.push(describeDay(day));
   }
+
   if (day.group !== previous.group) {
     lines.push(`\nГрупа будинку змінилася: ${previous.group} → ${day.group}`);
   }

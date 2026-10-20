@@ -13,6 +13,7 @@ import {
   formatDate,
   formatDurationAfter,
   formatMinutes,
+  outageRanges,
   scheduledTurnOff,
   scheduledTurnOn,
   ScheduleStatus,
@@ -26,8 +27,18 @@ import { YasnoService } from './yasno.service';
 /** A schedule last fetched more than this many poll intervals ago may be out of date. */
 const STALE_AFTER_INTERVALS = 3;
 
+/** A failed group lookup is reported at most once a day: the stored group still works. */
+const GROUP_ALERT_INTERVAL_MS = 24 * 60 * 60 * 1000;
+
 export interface SchedulePoll {
   at: Date;
+  error: string | null;
+}
+
+/** Where the group in use came from; `stored` means the address lookup is failing. */
+export interface GroupInfo {
+  group: string;
+  source: 'env' | 'address' | 'stored';
   error: string | null;
 }
 
@@ -38,6 +49,9 @@ export class LightScheduleService implements OnModuleInit, OnApplicationBootstra
   private running = false;
   private timer: NodeJS.Timeout | null = null;
   private readonly alert: FailureAlert;
+  private readonly groupAlert: FailureAlert;
+  private groupInfo: GroupInfo | null = null;
+  private lastFailure: { message: string; at: Date } | null = null;
 
   constructor(
     private readonly config: ConfigService,
@@ -48,11 +62,16 @@ export class LightScheduleService implements OnModuleInit, OnApplicationBootstra
     notifyAdmin: NotifyAdminService,
   ) {
     this.alert = new FailureAlert(message => notifyAdmin.send(message), '✅ YASNO знову віддає графік');
+    this.groupAlert = new FailureAlert(
+      message => notifyAdmin.send(message),
+      '✅ Групу знову визначено за адресою',
+      GROUP_ALERT_INTERVAL_MS,
+    );
   }
 
   onModuleInit(): void {
     if (!this.yasno.isConfigured()) {
-      this.logger.warn('YASNO schedule is disabled: set YASNO_STREET_ID + YASNO_HOUSE_ID or YASNO_GROUP');
+      this.logger.warn('YASNO schedule is disabled: set YASNO_STREET + YASNO_HOUSE or YASNO_GROUP');
       return;
     }
     const interval = this.getPollIntervalMinutes();
@@ -82,6 +101,14 @@ export class LightScheduleService implements OnModuleInit, OnApplicationBootstra
 
   getLastPoll(): SchedulePoll | null {
     return this.lastPoll;
+  }
+
+  getLastFailure(): { message: string; at: Date } | null {
+    return this.lastFailure;
+  }
+
+  getGroupInfo(): GroupInfo | null {
+    return this.groupInfo;
   }
 
   getLastSuccessAt(): Date | null {
@@ -145,6 +172,7 @@ export class LightScheduleService implements OnModuleInit, OnApplicationBootstra
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       this.lastPoll = { at: new Date(), error: message };
+      this.lastFailure = { message, at: this.lastPoll.at };
       this.logger.error('[YASNO] Schedule poll failed', message);
       this.alert.fail(`🚨 YASNO schedule poll failed: ${message}`);
     } finally {
@@ -153,25 +181,34 @@ export class LightScheduleService implements OnModuleInit, OnApplicationBootstra
   }
 
   /**
-   * YASNO_GROUP wins. Otherwise the group is looked up by address, so a building
-   * moved to another group is noticed; when the lookup fails (YASNO renumbered
-   * the houses on 2026-10-17 and the stored house id stopped resolving) the
-   * last stored group is used without alerting the admin on every poll.
+   * YASNO_GROUP wins. Otherwise the group is looked up by address on every poll,
+   * so a building moved to another group is noticed. When the lookup fails the
+   * last stored group keeps the schedule going, and the admin hears about it
+   * once a day rather than never: a silent fallback would hide a wrong group.
    */
   private async resolveGroup(): Promise<string> {
     const fixedGroup = this.config.get<string>('YASNO_GROUP');
     if (fixedGroup) {
+      this.groupInfo = { group: fixedGroup, source: 'env', error: null };
       return fixedGroup;
     }
     try {
-      return await this.yasno.resolveGroup();
+      const group = await this.yasno.resolveGroupByAddress();
+      this.groupInfo = { group, source: 'address', error: null };
+      this.groupAlert.ok();
+      return group;
     } catch (err) {
       const last = await this.scheduleModel.findOne().sort({ fetchedAt: -1 }).select('group').lean().exec();
       if (!last) {
         throw err;
       }
       const message = err instanceof Error ? err.message : String(err);
+      this.groupInfo = { group: last.group, source: 'stored', error: message };
       this.logger.warn(`[YASNO] Group lookup failed, using the last stored group ${last.group}: ${message}`);
+      this.groupAlert.fail(
+        `⚠️ Не вдалося визначити групу будинку за адресою, беру останню збережену (${last.group}). ` +
+          `Якщо будинок перевели в іншу групу, графік буде хибним.\n${message}`,
+      );
       return last.group;
     }
   }
@@ -197,9 +234,13 @@ export class LightScheduleService implements OnModuleInit, OnApplicationBootstra
     }
   }
 
+  /**
+   * Same status, group and outage intervals. Raw slots are not compared: YASNO
+   * sends a day without outages both as [] and as one NotPlanned slot.
+   */
   private isSame(a: ScheduleDay, b: ScheduleDay): boolean {
-    const slotsKey = (day: ScheduleDay) => JSON.stringify(day.slots.map(s => [s.start, s.end, s.type]));
-    return a.status === b.status && a.group === b.group && slotsKey(a) === slotsKey(b);
+    const outagesKey = (day: ScheduleDay) => JSON.stringify(outageRanges(day.slots));
+    return a.status === b.status && a.group === b.group && outagesKey(a) === outagesKey(b);
   }
 
   private async getLatest(date: string): Promise<ScheduleDay | null> {

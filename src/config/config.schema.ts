@@ -14,8 +14,8 @@ export interface EnvConfig {
   TUYA_POLL_INTERVAL_MINUTES: number;
   YASNO_REGION_ID: string;
   YASNO_DSO_ID: string;
-  YASNO_STREET_ID?: string;
-  YASNO_HOUSE_ID?: string;
+  YASNO_STREET?: string;
+  YASNO_HOUSE?: string;
   YASNO_GROUP?: string;
   YASNO_POLL_INTERVAL_MINUTES: number;
   TIMEZONE: string;
@@ -36,8 +36,8 @@ function requireKey(config: Record<string, unknown>, key: string): string {
 }
 
 /**
- * Minutes between polls, 1..59 (a cron step). Tuya Trial Edition allows ~26k
- * API calls a month: every 3 min is ~15k calls in a 31-day month.
+ * Minutes between polls, 1..59. Tuya Trial Edition allows ~26k API calls a
+ * month: every 3 min is ~15k calls in a 31-day month.
  */
 function parseMinutes(key: string, raw: string | undefined, fallback: number): number {
   if (raw === undefined) {
@@ -79,8 +79,8 @@ export function configValidationSchema(config: Record<string, unknown>): EnvConf
     ),
     YASNO_REGION_ID: get(config, 'YASNO_REGION_ID') || '25',
     YASNO_DSO_ID: get(config, 'YASNO_DSO_ID') || '902',
-    YASNO_STREET_ID: get(config, 'YASNO_STREET_ID'),
-    YASNO_HOUSE_ID: get(config, 'YASNO_HOUSE_ID'),
+    YASNO_STREET: get(config, 'YASNO_STREET'),
+    YASNO_HOUSE: get(config, 'YASNO_HOUSE'),
     YASNO_GROUP: get(config, 'YASNO_GROUP'),
     YASNO_POLL_INTERVAL_MINUTES: parseMinutes(
       'YASNO_POLL_INTERVAL_MINUTES',

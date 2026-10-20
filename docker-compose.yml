@@ -1,15 +1,27 @@
 services:
   app:
-    build: .
+    build:
+      context: .
+      args:
+        # shown by /diag; the deploy passes the commit being deployed
+        GIT_SHA: ${GIT_SHA:-unknown}
     container_name: light-tg-bot
     env_file: .env
     environment:
-      # Local time for /stats period boundaries ("today", "this week")
+      # Local time for logs and anything not given TIMEZONE explicitly
       TZ: Europe/Kyiv
     network_mode: host
     restart: unless-stopped
+    healthcheck:
+      # 503 when the power polling is stuck; the bot also restarts itself then
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:$$PORT/health >/dev/null || exit 1"]
+      interval: 1m
+      timeout: 10s
+      retries: 3
+      start_period: 1m
     logging:
-      driver: json-file
+      # journald keeps the logs across container re-creation on deploy
+      # (json-file logs go with the container); journald itself is capped at 200M
+      driver: journald
       options:
-        max-size: "10m"
-        max-file: "3"
+        tag: light-tg-bot

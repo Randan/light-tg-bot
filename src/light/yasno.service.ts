@@ -2,6 +2,8 @@ import { Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 
 import type { OutageSlot } from './schemas/outage-schedule.schema';
+import type { YasnoAddressEntry } from './yasno-address.util';
+import { normalizeHouse, normalizeStreet, pickAddressEntry } from './yasno-address.util';
 
 const BASE_URL = 'https://app.yasno.ua/api/blackout-service/public/shutdowns';
 const REQUEST_TIMEOUT_MS = 15_000;
@@ -19,6 +21,17 @@ export interface YasnoGroupSchedule {
   tomorrow: YasnoDay;
   updatedOn?: Date;
 }
+
+/** The address ids YASNO knows the house by; they are internal and change. */
+export interface YasnoAddress {
+  street: string;
+  house: string;
+  streetId: number;
+  houseId: number;
+}
+
+/** YASNO answered 404: the ids it was given no longer exist. */
+export class YasnoNotFoundError extends Error {}
 
 interface YasnoDayResponse {
   date: string;
@@ -39,24 +52,69 @@ type YasnoPlannedResponse = Record<
 export class YasnoService {
   constructor(private readonly config: ConfigService) {}
 
+  /** Address ids found by name, reused until YASNO stops recognizing them. */
+  private address: YasnoAddress | null = null;
+
   isConfigured(): boolean {
-    const hasAddress = this.config.get<string>('YASNO_STREET_ID') && this.config.get<string>('YASNO_HOUSE_ID');
-    return Boolean(this.config.get<string>('YASNO_GROUP') || hasAddress);
+    return Boolean(this.config.get<string>('YASNO_GROUP') || this.hasAddress());
+  }
+
+  hasAddress(): boolean {
+    return Boolean(this.config.get<string>('YASNO_STREET') && this.config.get<string>('YASNO_HOUSE'));
+  }
+
+  /** The address ids in use, if already found. */
+  getAddress(): YasnoAddress | null {
+    return this.address;
   }
 
   /**
-   * Since 2026-10-13 Kyiv schedules are per building, so the group is resolved
-   * from the address on every poll; YASNO_GROUP overrides it.
+   * The group of the configured address. The address is kept by name, not by
+   * id: YASNO renumbered every street and house on 2026-10-17, so stored ids are
+   * looked up again by name as soon as YASNO answers 404 for them.
    */
-  async resolveGroup(): Promise<string> {
-    const fixedGroup = this.config.get<string>('YASNO_GROUP');
-    if (fixedGroup) {
-      return fixedGroup;
+  async resolveGroupByAddress(): Promise<string> {
+    if (this.address) {
+      try {
+        return await this.fetchGroup(this.address);
+      } catch (err) {
+        if (!(err instanceof YasnoNotFoundError)) {
+          throw err;
+        }
+        this.address = null;
+      }
     }
+    const address = await this.findAddress();
+    const group = await this.fetchGroup(address);
+    this.address = address;
+    return group;
+  }
+
+  private async findAddress(): Promise<YasnoAddress> {
+    const street = this.config.get<string>('YASNO_STREET') ?? '';
+    const house = this.config.get<string>('YASNO_HOUSE') ?? '';
+
+    const streets = await this.get<YasnoAddressEntry[]>('/addresses/v2/streets', {
+      ...this.regionParams(),
+      query: normalizeStreet(street),
+    });
+    const streetEntry = pickAddressEntry(streets, street, normalizeStreet, 'street');
+
+    const houses = await this.get<YasnoAddressEntry[]>('/addresses/v2/houses', {
+      ...this.regionParams(),
+      streetId: String(streetEntry.id),
+      query: house,
+    });
+    const houseEntry = pickAddressEntry(houses, house, normalizeHouse, 'house');
+
+    return { street: streetEntry.value, house: houseEntry.value, streetId: streetEntry.id, houseId: houseEntry.id };
+  }
+
+  private async fetchGroup(address: YasnoAddress): Promise<string> {
     const data = await this.get<{ group: number; subgroup: number }>('/addresses/v2/group', {
       ...this.regionParams(),
-      streetId: this.config.get<string>('YASNO_STREET_ID') ?? '',
-      houseId: this.config.get<string>('YASNO_HOUSE_ID') ?? '',
+      streetId: String(address.streetId),
+      houseId: String(address.houseId),
     });
     return `${data.group}.${data.subgroup}`;
   }
@@ -110,7 +168,8 @@ export class YasnoService {
       } catch {
         // not JSON: an Incapsula challenge page or similar
       }
-      throw new Error(`YASNO ${path} responded ${response.status}${detail ? `: ${detail}` : ''}`);
+      const message = `YASNO ${path} responded ${response.status}${detail ? `: ${detail}` : ''}`;
+      throw response.status === 404 ? new YasnoNotFoundError(message) : new Error(message);
     }
     return (await response.json()) as T;
   }

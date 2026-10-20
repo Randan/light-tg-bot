@@ -38,7 +38,7 @@ interface HistoryEntry {
   status: boolean;
 }
 
-function computeOffDuration(
+export function computeOffDuration(
   startDate: Date,
   endDate: Date,
   lastBeforePeriod: HistoryEntry | null,

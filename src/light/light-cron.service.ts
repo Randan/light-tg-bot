@@ -14,6 +14,11 @@ const NO_NETWORK_LOG_INTERVAL_MS = 5 * 60 * 1000;
 /** A poll loop that has not finished a round in this many intervals is stuck. */
 const STUCK_AFTER_INTERVALS = 3;
 
+const WATCHDOG_INTERVAL_MS = 60 * 1000;
+
+/** Time for the admin alert to leave before the process exits. */
+const EXIT_GRACE_MS = 5000;
+
 export interface LightCheck {
   status: boolean;
   checkedAt: Date;
@@ -30,6 +35,7 @@ export class LightCronService implements OnModuleInit, OnApplicationBootstrap, O
   private pendingChange: LightCheck | null = null;
   private running = false;
   private timer: NodeJS.Timeout | null = null;
+  private watchdog: NodeJS.Timeout | null = null;
   private readonly startedAt = Date.now();
   private lastRoundAt: number | null = null;
   private readonly alert: FailureAlert;
@@ -40,7 +46,7 @@ export class LightCronService implements OnModuleInit, OnApplicationBootstrap, O
     private readonly status: LightStatusService,
     private readonly schedule: LightScheduleService,
     private readonly logger: LoggerService,
-    notifyAdmin: NotifyAdminService,
+    private readonly notifyAdmin: NotifyAdminService,
   ) {
     this.alert = new FailureAlert(message => notifyAdmin.send(message), '✅ Перевірка світла знову працює');
   }
@@ -50,6 +56,7 @@ export class LightCronService implements OnModuleInit, OnApplicationBootstrap, O
     // a plain interval: a cron step like */7 leaves a short gap at every hour
     this.timer = setInterval(() => void this.pollDeviceStatus(), interval * 60 * 1000);
     this.logger.log(`Light status polling registered (every ${interval} minutes)`);
+    this.watchdog = setInterval(() => this.checkNotStuck(), WATCHDOG_INTERVAL_MS);
   }
 
   onApplicationBootstrap(): void {
@@ -60,6 +67,26 @@ export class LightCronService implements OnModuleInit, OnApplicationBootstrap, O
     if (this.timer) {
       clearInterval(this.timer);
     }
+    if (this.watchdog) {
+      clearInterval(this.watchdog);
+    }
+  }
+
+  /**
+   * A stuck poll never recovers in-process, so exit and let Docker
+   * (restart: unless-stopped) start a fresh one, after telling the admin.
+   */
+  private checkNotStuck(): void {
+    if (this.isPolling()) {
+      return;
+    }
+    if (this.watchdog) {
+      clearInterval(this.watchdog);
+    }
+    const since = new Date(this.lastRoundAt ?? this.startedAt).toISOString();
+    this.logger.error(`[WATCHDOG] Power polling has not finished a round since ${since}, restarting`);
+    this.notifyAdmin.send(`🚨 Перевірка світла зависла (остання з ${since}), перезапускаю бота`);
+    setTimeout(() => process.exit(1), EXIT_GRACE_MS);
   }
 
   getPollIntervalMinutes(): number {
@@ -69,6 +96,15 @@ export class LightCronService implements OnModuleInit, OnApplicationBootstrap, O
   /** The last successful Tuya answer; null until the first one arrives. */
   getLastCheck(): LightCheck | null {
     return this.lastCheck;
+  }
+
+  /** For /diag. */
+  getRuntime(): { startedAt: Date; lastRoundAt: Date | null; pendingChange: LightCheck | null } {
+    return {
+      startedAt: new Date(this.startedAt),
+      lastRoundAt: this.lastRoundAt ? new Date(this.lastRoundAt) : null,
+      pendingChange: this.pendingChange,
+    };
   }
 
   /** False when the poll loop has not finished a round for a while: it is stuck. */

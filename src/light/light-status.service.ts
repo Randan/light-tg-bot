@@ -60,6 +60,11 @@ export class LightStatusService {
     this.logger.log(`[NOTIFY] Sent a message to ${chatIds.length} subscribers`);
   }
 
+  async countSubscribers(deviceId: string): Promise<number> {
+    const subscription = await this.subscriptionModel.findOne({ deviceId }).lean().exec();
+    return subscription?.chatIds.length ?? 0;
+  }
+
   /** Returns false when the chat was already subscribed. */
   async subscribe(deviceId: string, chatId: number): Promise<boolean> {
     const result = await this.subscriptionModel
