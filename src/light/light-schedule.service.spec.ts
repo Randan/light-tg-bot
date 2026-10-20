@@ -56,6 +56,7 @@ describe('LightScheduleService.poll', () => {
       yasno as never,
       scheduleModel as never,
       { notifySubscribers } as never,
+      { addDiagnostics: jest.fn() } as never,
       logger as never,
       { send: (message: string) => adminMessages.push(message) } as never,
     );
@@ -113,10 +114,12 @@ describe('LightScheduleService', () => {
   let env: Record<string, string>;
   let yasno: Record<string, jest.Mock>;
   let adminMessages: string[];
+  let registry: { addDiagnostics: jest.Mock };
   let service: LightScheduleService;
 
   beforeEach(() => {
     jest.useFakeTimers().setSystemTime(NOW);
+    registry = { addDiagnostics: jest.fn() };
     days = {};
     env = { TUYA_DEVICE_ID: 'dev', TIMEZONE: 'Europe/Kyiv' };
     adminMessages = [];
@@ -146,6 +149,7 @@ describe('LightScheduleService', () => {
       yasno as never,
       scheduleModel as never,
       { notifySubscribers: jest.fn() } as never,
+      registry as never,
       { log: jest.fn(), warn: jest.fn(), error: jest.fn() } as never,
       { send: (message: string) => adminMessages.push(message) } as never,
     );
@@ -224,6 +228,36 @@ describe('LightScheduleService', () => {
     service.onModuleDestroy();
     await jest.advanceTimersByTimeAsync(30 * 60 * 1000);
     expect(yasno.getGroupSchedule).toHaveBeenCalledTimes(1);
+  });
+
+  it('adds its /diag section with the address, the ids and where the group came from', async () => {
+    env.YASNO_STREET = 'Тираспольська';
+    env.YASNO_HOUSE = '54';
+    yasno.getAddress = jest
+      .fn()
+      .mockReturnValue({ street: 'вул. Тираспольська', house: '54', streetId: 896, houseId: 38502 });
+    service.onModuleInit();
+    await service.poll();
+    const [title, section] = registry.addDiagnostics.mock.calls[0];
+    expect(title).toBe('YASNO (кожні 10 хв)');
+    const lines = section();
+    expect(lines).toContain('адреса: Тираспольська, 54');
+    expect(lines).toContain('id: вулиця 896, будинок 38502');
+    expect(lines).toContain('група: 2.1 (за адресою)');
+    expect(lines).toContain('остання помилка: —');
+    service.onModuleDestroy();
+  });
+
+  it('flags a group taken from the database in /diag', async () => {
+    await service.poll(); // stores a schedule with group 2.1
+    yasno.resolveGroupByAddress.mockRejectedValue(new Error('House 40503 not found'));
+    yasno.getAddress = jest.fn().mockReturnValue(null);
+    service.onModuleInit();
+    await service.poll();
+    const lines = registry.addDiagnostics.mock.calls[0][1]();
+    expect(lines).toContain('група: 2.1 (⚠️ з бази, адреса не знаходиться)');
+    expect(lines).toContain('помилка пошуку групи: House 40503 not found');
+    service.onModuleDestroy();
   });
 
   it('uses YASNO_GROUP without looking the address up', async () => {

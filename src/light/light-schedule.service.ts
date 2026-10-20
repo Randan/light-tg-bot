@@ -2,10 +2,10 @@ import type { OnApplicationBootstrap, OnModuleDestroy, OnModuleInit } from '@nes
 import { Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { InjectModel } from '@nestjs/mongoose';
+import { BotKitRegistry, FailureAlert, formatDiagTime, Poller } from '@randan/tg-bot-kit';
 import { LoggerService, NotifyAdminService } from '@randan/tg-logger';
 import type { Model } from 'mongoose';
 
-import { FailureAlert } from './failure-alert.util';
 import { LightStatusService } from './light-status.service';
 import type { ScheduleDay } from './schedule-format.util';
 import {
@@ -46,8 +46,7 @@ export interface GroupInfo {
 export class LightScheduleService implements OnModuleInit, OnApplicationBootstrap, OnModuleDestroy {
   private lastPoll: SchedulePoll | null = null;
   private lastSuccessAt: Date | null = null;
-  private running = false;
-  private timer: NodeJS.Timeout | null = null;
+  private readonly poller: Poller;
   private readonly alert: FailureAlert;
   private readonly groupAlert: FailureAlert;
   private groupInfo: GroupInfo | null = null;
@@ -58,9 +57,11 @@ export class LightScheduleService implements OnModuleInit, OnApplicationBootstra
     private readonly yasno: YasnoService,
     @InjectModel(OutageSchedule.name) private readonly scheduleModel: Model<OutageSchedule>,
     private readonly status: LightStatusService,
+    private readonly registry: BotKitRegistry,
     private readonly logger: LoggerService,
     notifyAdmin: NotifyAdminService,
   ) {
+    this.poller = new Poller({ intervalMs: this.getPollIntervalMinutes() * 60 * 1000, run: () => this.pollOnce() });
     this.alert = new FailureAlert(message => notifyAdmin.send(message), '✅ YASNO знову віддає графік');
     this.groupAlert = new FailureAlert(
       message => notifyAdmin.send(message),
@@ -75,14 +76,13 @@ export class LightScheduleService implements OnModuleInit, OnApplicationBootstra
       return;
     }
     const interval = this.getPollIntervalMinutes();
-    this.timer = setInterval(() => void this.poll(), interval * 60 * 1000);
+    this.poller.start();
     this.logger.log(`YASNO schedule polling registered (every ${interval} minutes)`);
+    this.registry.addDiagnostics(`YASNO (кожні ${interval} хв)`, () => this.describeDiagnostics());
   }
 
   onModuleDestroy(): void {
-    if (this.timer) {
-      clearInterval(this.timer);
-    }
+    this.poller.stop();
   }
 
   onApplicationBootstrap(): void {
@@ -153,12 +153,12 @@ export class LightScheduleService implements OnModuleInit, OnApplicationBootstra
     return `За графіком ${action}${day} о ${formatMinutes(at % (24 * 60))} (через ${formatDurationAfter(at - now)})`;
   }
 
+  /** One poll right now; skipped while one is already running. */
   async poll(): Promise<void> {
-    if (this.running) {
-      return;
-    }
-    this.running = true;
+    await this.poller.runNow();
+  }
 
+  private async pollOnce(): Promise<void> {
     try {
       const group = await this.resolveGroup();
       const schedule = await this.yasno.getGroupSchedule(group);
@@ -175,9 +175,24 @@ export class LightScheduleService implements OnModuleInit, OnApplicationBootstra
       this.lastFailure = { message, at: this.lastPoll.at };
       this.logger.error('[YASNO] Schedule poll failed', message);
       this.alert.fail(`🚨 YASNO schedule poll failed: ${message}`);
-    } finally {
-      this.running = false;
     }
+  }
+
+  private describeDiagnostics(): string[] {
+    const group = this.groupInfo;
+    const address = this.yasno.getAddress();
+    const source = { env: 'з YASNO_GROUP', address: 'за адресою', stored: '⚠️ з бази, адреса не знаходиться' };
+    const lines = [
+      `адреса: ${this.config.get<string>('YASNO_STREET') ?? '—'}, ${this.config.get<string>('YASNO_HOUSE') ?? '—'}`,
+      `id: ${address ? `вулиця ${address.streetId}, будинок ${address.houseId}` : '—'}`,
+      `група: ${group ? `${group.group} (${source[group.source]})` : '—'}`,
+      `останній успіх: ${formatDiagTime(this.lastSuccessAt)}${this.isFresh() ? '' : ' ⚠️ застаріло'}`,
+      `остання помилка: ${this.lastFailure ? `${formatDiagTime(this.lastFailure.at)}: ${this.lastFailure.message}` : '—'}`,
+    ];
+    if (group?.error) {
+      lines.push(`помилка пошуку групи: ${group.error}`);
+    }
+    return lines;
   }
 
   /**

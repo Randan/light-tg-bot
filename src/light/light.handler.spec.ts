@@ -1,4 +1,6 @@
-import { BOT_COMMANDS } from './bot-commands.service';
+import { AdminService } from '@randan/tg-bot-kit';
+
+import { BOT_COMMANDS } from './bot-commands';
 import { LightHandler } from './light.handler';
 
 const ADMIN = 100;
@@ -11,7 +13,6 @@ describe('LightHandler', () => {
   let statistics: Record<string, jest.Mock>;
   let tuya: Record<string, jest.Mock>;
   let schedule: Record<string, jest.Mock>;
-  let yasno: Record<string, jest.Mock>;
   let adminMessages: string[];
   let handler: LightHandler;
 
@@ -47,11 +48,6 @@ describe('LightHandler', () => {
       getGroupInfo: jest.fn().mockReturnValue({ group: '2.1', source: 'address', error: null }),
       getLastFailure: jest.fn().mockReturnValue(null),
     };
-    yasno = {
-      getAddress: jest
-        .fn()
-        .mockReturnValue({ street: 'вул. Тираспольська', house: '54', streetId: 896, houseId: 38502 }),
-    };
     adminMessages = [];
 
     handler = new LightHandler(
@@ -61,7 +57,7 @@ describe('LightHandler', () => {
       statistics as never,
       tuya as never,
       schedule as never,
-      yasno as never,
+      new AdminService({ get: (key: string) => env[key] } as never),
       { log: jest.fn(), error: jest.fn() } as never,
       { send: (message: string) => adminMessages.push(message) } as never,
     );
@@ -288,45 +284,8 @@ describe('LightHandler', () => {
     });
   });
 
-  describe('/diag', () => {
-    it('is silent for anyone but the admin', async () => {
-      const c = ctx(1);
-      await handler.diag(c as never);
-      expect(c.sent).toHaveLength(0);
-    });
-
-    it('shows the state of Tuya, YASNO and the address lookup', async () => {
-      env.YASNO_STREET = 'Тираспольська';
-      env.YASNO_HOUSE = '54';
-      schedule.getGroupInfo.mockReturnValue({ group: '2.1', source: 'stored', error: 'House 40503 not found' });
-      tuya.getHealth.mockReturnValue({ lastSuccessAt: NOW, lastFailure: { message: 'code=500', at: NOW } });
-      const c = ctx(ADMIN);
-      await handler.diag(c as never);
-
-      const message = text(c);
-      expect(message).toContain('Підписників: 2');
-      expect(message).toContain('опитування працює');
-      expect(message).toContain('остання відповідь: онлайн о 20.10, 11:59');
-      expect(message).toContain('остання помилка: 20.10, 12:00: code=500');
-      expect(message).toContain('адреса: Тираспольська, 54');
-      expect(message).toContain('id: вулиця 896, будинок 38502');
-      expect(message).toContain('група: 2.1 (⚠️ з бази, адреса не знаходиться)');
-      expect(message).toContain('помилка пошуку групи: House 40503 not found');
-    });
-
-    it('flags a stuck poll loop', async () => {
-      cron.isPolling.mockReturnValue(false);
-      const c = ctx(ADMIN);
-      await handler.diag(c as never);
-      expect(text(c)).toContain('⚠️ ЗАВИСЛО');
-    });
-
-    it('reports its own failure instead of staying silent', async () => {
-      lightStatus.countSubscribers.mockRejectedValue(new Error('db down'));
-      const c = ctx(ADMIN);
-      await handler.diag(c as never);
-      expect(text(c)).toBe('Помилка діагностики: db down');
-    });
+  it('has no /diag of its own: the kit renders it from the registered sections', () => {
+    expect((handler as unknown as Record<string, unknown>).diag).toBeUndefined();
   });
 
   describe('/stats', () => {

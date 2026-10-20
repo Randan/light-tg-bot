@@ -1,23 +1,15 @@
 import type { OnApplicationBootstrap, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
 import { Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import { BotKitRegistry, FailureAlert, formatDiagTime, Poller, Watchdog } from '@randan/tg-bot-kit';
 import { LoggerService, NotifyAdminService } from '@randan/tg-logger';
 
-import { FailureAlert } from './failure-alert.util';
 import { LightScheduleService } from './light-schedule.service';
 import { LightStatusService } from './light-status.service';
 import { LightTuyaService } from './light-tuya.service';
 import { isNetworkAvailable } from './network.util';
 
 const NO_NETWORK_LOG_INTERVAL_MS = 5 * 60 * 1000;
-
-/** A poll loop that has not finished a round in this many intervals is stuck. */
-const STUCK_AFTER_INTERVALS = 3;
-
-const WATCHDOG_INTERVAL_MS = 60 * 1000;
-
-/** Time for the admin alert to leave before the process exits. */
-const EXIT_GRACE_MS = 5000;
 
 export interface LightCheck {
   status: boolean;
@@ -33,11 +25,8 @@ export class LightCronService implements OnModuleInit, OnApplicationBootstrap, O
   private lastCheck: LightCheck | null = null;
   /** A status that differs from the history, seen once: one reading may be a Wi-Fi blip. */
   private pendingChange: LightCheck | null = null;
-  private running = false;
-  private timer: NodeJS.Timeout | null = null;
-  private watchdog: NodeJS.Timeout | null = null;
-  private readonly startedAt = Date.now();
-  private lastRoundAt: number | null = null;
+  private readonly poller: Poller<Exclude<PollOutcome, 'busy'>>;
+  private readonly watchdog: Watchdog;
   private readonly alert: FailureAlert;
 
   constructor(
@@ -45,18 +34,38 @@ export class LightCronService implements OnModuleInit, OnApplicationBootstrap, O
     private readonly tuya: LightTuyaService,
     private readonly status: LightStatusService,
     private readonly schedule: LightScheduleService,
+    private readonly registry: BotKitRegistry,
     private readonly logger: LoggerService,
     private readonly notifyAdmin: NotifyAdminService,
   ) {
     this.alert = new FailureAlert(message => notifyAdmin.send(message), '✅ Перевірка світла знову працює');
+    this.poller = new Poller({
+      intervalMs: this.getPollIntervalMinutes() * 60 * 1000,
+      run: () => this.checkOnce(),
+    });
+    // a stuck poll never recovers in-process: exit and let Docker start a fresh one
+    this.watchdog = new Watchdog({
+      check: () =>
+        this.poller.isStuck()
+          ? `Перевірка світла зависла (останній цикл: ${formatDiagTime(this.poller.getLastRoundAt())})`
+          : null,
+      onStuck: reason => {
+        this.logger.error(`[WATCHDOG] ${reason}, restarting`);
+        this.notifyAdmin.send(`🚨 ${reason}, перезапускаю бота`);
+      },
+    });
   }
 
   onModuleInit(): void {
-    const interval = this.getPollIntervalMinutes();
-    // a plain interval: a cron step like */7 leaves a short gap at every hour
-    this.timer = setInterval(() => void this.pollDeviceStatus(), interval * 60 * 1000);
-    this.logger.log(`Light status polling registered (every ${interval} minutes)`);
-    this.watchdog = setInterval(() => this.checkNotStuck(), WATCHDOG_INTERVAL_MS);
+    this.poller.start();
+    this.watchdog.start();
+    this.logger.log(`Light status polling registered (every ${this.getPollIntervalMinutes()} minutes)`);
+
+    this.registry.addHealthCheck('перевірка світла', () => ({
+      ok: !this.poller.isStuck(),
+      details: `останній цикл ${formatDiagTime(this.poller.getLastRoundAt())}`,
+    }));
+    this.registry.addDiagnostics(`Tuya (кожні ${this.getPollIntervalMinutes()} хв)`, () => this.describeDiagnostics());
   }
 
   onApplicationBootstrap(): void {
@@ -64,29 +73,8 @@ export class LightCronService implements OnModuleInit, OnApplicationBootstrap, O
   }
 
   onModuleDestroy(): void {
-    if (this.timer) {
-      clearInterval(this.timer);
-    }
-    if (this.watchdog) {
-      clearInterval(this.watchdog);
-    }
-  }
-
-  /**
-   * A stuck poll never recovers in-process, so exit and let Docker
-   * (restart: unless-stopped) start a fresh one, after telling the admin.
-   */
-  private checkNotStuck(): void {
-    if (this.isPolling()) {
-      return;
-    }
-    if (this.watchdog) {
-      clearInterval(this.watchdog);
-    }
-    const since = new Date(this.lastRoundAt ?? this.startedAt).toISOString();
-    this.logger.error(`[WATCHDOG] Power polling has not finished a round since ${since}, restarting`);
-    this.notifyAdmin.send(`🚨 Перевірка світла зависла (остання з ${since}), перезапускаю бота`);
-    setTimeout(() => process.exit(1), EXIT_GRACE_MS);
+    this.poller.stop();
+    this.watchdog.stop();
   }
 
   getPollIntervalMinutes(): number {
@@ -98,28 +86,17 @@ export class LightCronService implements OnModuleInit, OnApplicationBootstrap, O
     return this.lastCheck;
   }
 
-  /** For /diag. */
-  getRuntime(): { startedAt: Date; lastRoundAt: Date | null; pendingChange: LightCheck | null } {
-    return {
-      startedAt: new Date(this.startedAt),
-      lastRoundAt: this.lastRoundAt ? new Date(this.lastRoundAt) : null,
-      pendingChange: this.pendingChange,
-    };
-  }
-
   /** False when the poll loop has not finished a round for a while: it is stuck. */
   isPolling(): boolean {
-    const stuckAfterMs = this.getPollIntervalMinutes() * STUCK_AFTER_INTERVALS * 60 * 1000;
-    return Date.now() - (this.lastRoundAt ?? this.startedAt) <= stuckAfterMs;
+    return !this.poller.isStuck();
   }
 
-  async pollDeviceStatus(): Promise<PollOutcome> {
-    if (this.running) {
-      this.logger.warn('[CRON] Previous check still running, skipping');
-      return 'busy';
-    }
-    this.running = true;
+  /** One check right now (for the admin's /statusrequest too), or `busy` when one is running. */
+  pollDeviceStatus(): Promise<PollOutcome> {
+    return this.poller.runNow();
+  }
 
+  private async checkOnce(): Promise<Exclude<PollOutcome, 'busy'>> {
     try {
       if (!(await isNetworkAvailable(this.config.get<string>('TUYA_BASE_URL')))) {
         const now = Date.now();
@@ -172,10 +149,22 @@ export class LightCronService implements OnModuleInit, OnApplicationBootstrap, O
       this.logger.error('[CRON] Error in pollDeviceStatus', err);
       this.alert.fail(`🚨 Light cron error: ${err instanceof Error ? err.message : String(err)}`);
       return 'failed';
-    } finally {
-      this.lastRoundAt = Date.now();
-      this.running = false;
     }
+  }
+
+  private async describeDiagnostics(): Promise<string[]> {
+    const state = (status: boolean) => (status ? 'онлайн' : 'офлайн');
+    const tuya = this.tuya.getHealth();
+    const history = await this.status.getLastHistoryEntry();
+    const pending = this.pendingChange;
+    return [
+      `останній цикл: ${formatDiagTime(this.poller.getLastRoundAt())}`,
+      `остання відповідь: ${this.lastCheck ? `${state(this.lastCheck.status)} о ${formatDiagTime(this.lastCheck.checkedAt)}` : '—'}`,
+      `непідтверджена зміна: ${pending ? `${state(pending.status)} з ${formatDiagTime(pending.checkedAt)}` : 'немає'}`,
+      `остання помилка: ${tuya.lastFailure ? `${formatDiagTime(tuya.lastFailure.at)}: ${tuya.lastFailure.message}` : '—'}`,
+      `в історії: ${history ? `${history.status ? 'світло є' : 'світла немає'} з ${formatDiagTime(history.timestamp)}` : '—'}`,
+      `підписників: ${await this.status.countSubscribers(this.config.get<string>('TUYA_DEVICE_ID')!)}`,
+    ];
   }
 
   /** A schedule failure must not stop the power change from being announced. */

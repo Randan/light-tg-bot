@@ -44,6 +44,16 @@ User-facing text is Ukrainian; code, comments and commits are English.
     address search fails, so do not conclude anything about ids from there. It works from
     the Pi and from the user's Mac.
 
+## Shared plumbing: @randan/tg-bot-kit
+
+`/health`, the admin `/diag`, the command menu (`src/light/bot-commands.ts`), `Poller`, `Watchdog`,
+`FailureAlert`, `withTimeout`, `isChatGone` and the env helpers come from `@randan/tg-bot-kit`;
+services register their `/diag` sections and health checks through `BotKitRegistry`. Fix shared
+behaviour in the kit, not by copying code here. CI is the kit's shared workflow
+(`Randan/tg-bot-kit/.github/workflows/bot.yml@v1`). Regenerate `package-lock.json` on Linux
+(`docker run --rm -v "$PWD":/app -w /app node:24-alpine npm install --package-lock-only`): a
+macOS lockfile can miss Linux-only packages and break `npm ci` in CI.
+
 ## Running, testing, deploying
 
 - `npm run lint`, `npm run format:check`, `npm run build`, `npm test` (`npm run test:cov`

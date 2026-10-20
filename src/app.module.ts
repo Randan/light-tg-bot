@@ -1,10 +1,11 @@
 import { Module } from '@nestjs/common';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { MongooseModule } from '@nestjs/mongoose';
+import { BotKitModule } from '@randan/tg-bot-kit';
 import { LoggerModule, NotifyAdminModule } from '@randan/tg-logger';
 
-import { HealthModule } from './common/health/health.module';
 import { configValidationSchema } from './config/config.schema';
+import { BOT_COMMANDS } from './light/bot-commands';
 import { TelegramModule } from './telegram/telegram.module';
 
 @Module({
@@ -28,7 +29,8 @@ import { TelegramModule } from './telegram/telegram.module';
     }),
     LoggerModule,
     NotifyAdminModule,
-    HealthModule,
+    // GET /health, the admin /diag and the command menu
+    BotKitModule.forRoot({ name: 'light-tg-bot', commands: BOT_COMMANDS }),
     TelegramModule,
   ],
 })

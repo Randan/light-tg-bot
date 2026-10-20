@@ -1,5 +1,7 @@
+import type { OnModuleInit } from '@nestjs/common';
 import { Injectable } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
+import { BotKitRegistry, describeTelegramError, isChatGone } from '@randan/tg-bot-kit';
 import { LoggerService } from '@randan/tg-logger';
 import type { Model } from 'mongoose';
 import { InjectBot } from 'nestjs-telegraf';
@@ -10,13 +12,22 @@ import { LightHistory } from './schemas/light-history.schema';
 import { LightSubscription } from './schemas/light-subscription.schema';
 
 @Injectable()
-export class LightStatusService {
+export class LightStatusService implements OnModuleInit {
   constructor(
     @InjectBot() private readonly bot: Telegraf,
     @InjectModel(LightSubscription.name) private readonly subscriptionModel: Model<LightSubscription>,
     @InjectModel(LightHistory.name) private readonly historyModel: Model<LightHistory>,
+    private readonly registry: BotKitRegistry,
     private readonly logger: LoggerService,
   ) {}
+
+  onModuleInit(): void {
+    // 1 = connected; mongoose keeps retrying while it is down
+    this.registry.addHealthCheck('MongoDB', () => ({
+      ok: this.historyModel.db.readyState === 1,
+      details: `readyState ${this.historyModel.db.readyState}`,
+    }));
+  }
 
   async getLastHistoryEntry(): Promise<{ timestamp: Date; status: boolean } | null> {
     return this.historyModel.findOne().sort({ timestamp: -1 }).lean().exec();
@@ -83,16 +94,9 @@ export class LightStatusService {
     try {
       await this.bot.telegram.sendMessage(chatId, message);
     } catch (err) {
-      const response = (err as { response?: { error_code?: number; description?: string } }).response;
-      // 403: blocked, kicked or a deleted account; 400 "chat not found": the chat is gone
-      const isGone =
-        response?.error_code === 403 ||
-        (response?.error_code === 400 && /chat not found/i.test(response.description ?? ''));
-      if (isGone) {
+      if (isChatGone(err)) {
         await this.unsubscribe(deviceId, chatId);
-        this.logger.log(
-          `[NOTIFY] Chat ${chatId} is unreachable (${response?.description ?? 'no reason'}), unsubscribed`,
-        );
+        this.logger.log(`[NOTIFY] Chat ${chatId} is unreachable (${describeTelegramError(err)}), unsubscribed`);
         return;
       }
       this.logger.error(`Failed to send message to chat ${chatId}`, err);

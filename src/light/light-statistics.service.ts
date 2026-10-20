@@ -9,14 +9,7 @@ import { zonedCalendar, zonedMidnight } from './schedule-format.util';
 import { LightHistory } from './schemas/light-history.schema';
 
 type PeriodKey =
-  | 'day'
-  | 'week_current'
-  | 'week_prev'
-  | 'month_current'
-  | 'month_prev'
-  | 'year_current'
-  | 'year_prev'
-  | 'all';
+  'day' | 'week_current' | 'week_prev' | 'month_current' | 'month_prev' | 'year_current' | 'year_prev' | 'all';
 
 function formatDays(n: number): string {
   const mod100 = n % 100;

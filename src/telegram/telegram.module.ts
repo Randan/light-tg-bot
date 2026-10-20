@@ -1,5 +1,6 @@
 import { Module } from '@nestjs/common';
 import { ConfigModule, ConfigService } from '@nestjs/config';
+import { BotKitModule } from '@randan/tg-bot-kit';
 import { TelegrafModule } from 'nestjs-telegraf';
 
 import { LightModule } from '../light/light.module';
@@ -13,7 +14,8 @@ import { LightModule } from '../light/light.module';
         if (!token) {
           throw new Error('BOT_TOKEN is required');
         }
-        return { token, include: [LightModule] };
+        // BotKitModule for the admin /diag command
+        return { token, include: [LightModule, BotKitModule] };
       },
       inject: [ConfigService],
     }),

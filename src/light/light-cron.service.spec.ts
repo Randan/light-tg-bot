@@ -19,6 +19,7 @@ describe('LightCronService.pollDeviceStatus', () => {
     const tuya = { isDeviceOnline: jest.fn(async () => readings.shift() ?? null) };
     const status = { getLastHistoryEntry: jest.fn(async () => history), applyStatusChange };
     const schedule = { describeNextChange: jest.fn(async () => null) };
+    const registry = { addHealthCheck: jest.fn(), addDiagnostics: jest.fn() };
     const logger = { log: jest.fn(), warn: jest.fn(), error: jest.fn() };
     const notifyAdmin = { send: jest.fn() };
 
@@ -27,6 +28,7 @@ describe('LightCronService.pollDeviceStatus', () => {
       tuya as never,
       status as never,
       schedule as never,
+      registry as never,
       logger as never,
       notifyAdmin as never,
     );
@@ -74,22 +76,53 @@ describe('LightCronService.pollDeviceStatus', () => {
 describe('LightCronService loop', () => {
   const build = (overrides: { isOnline?: jest.Mock; history?: jest.Mock } = {}) => {
     const adminMessages: string[] = [];
+    const registry = { addHealthCheck: jest.fn(), addDiagnostics: jest.fn() };
     const logger = { log: jest.fn(), warn: jest.fn(), error: jest.fn() };
     const cron = new LightCronService(
       { get: (key: string, fallback?: unknown) => ({ TUYA_DEVICE_ID: 'dev' })[key] ?? fallback } as never,
-      { isDeviceOnline: overrides.isOnline ?? jest.fn().mockResolvedValue(true) } as never,
+      {
+        isDeviceOnline: overrides.isOnline ?? jest.fn().mockResolvedValue(true),
+        getHealth: () => ({
+          lastSuccessAt: null,
+          lastFailure: { message: 'code=500', at: new Date('2026-10-20T09:00:00Z') },
+        }),
+      } as never,
       {
         getLastHistoryEntry: overrides.history ?? jest.fn().mockResolvedValue({ timestamp: new Date(), status: true }),
         applyStatusChange: jest.fn(),
+        countSubscribers: jest.fn().mockResolvedValue(2),
       } as never,
       { describeNextChange: jest.fn().mockResolvedValue(null) } as never,
+      registry as never,
       logger as never,
       { send: (message: string) => adminMessages.push(message) } as never,
     );
-    return { cron, adminMessages, logger };
+    return { cron, adminMessages, logger, registry };
   };
 
   afterEach(() => jest.useRealTimers());
+
+  it('reports a stuck loop to /health and its state to /diag', async () => {
+    jest.useFakeTimers().setSystemTime(new Date('2026-10-20T09:00:00Z'));
+    const { cron, registry } = build();
+    cron.onModuleInit();
+    await cron.pollDeviceStatus();
+
+    const [name, check] = registry.addHealthCheck.mock.calls[0];
+    expect(name).toBe('перевірка світла');
+    expect(check().ok).toBe(true);
+
+    const [title, section] = registry.addDiagnostics.mock.calls[0];
+    expect(title).toBe('Tuya (кожні 3 хв)');
+    const lines = await section();
+    expect(lines).toContain('остання відповідь: онлайн о 20.10, 12:00');
+    expect(lines).toContain('остання помилка: 20.10, 12:00: code=500');
+    expect(lines).toContain('підписників: 2');
+
+    jest.setSystemTime(new Date('2026-10-20T09:10:00Z'));
+    expect(check().ok).toBe(false);
+    cron.onModuleDestroy();
+  });
 
   it('skips a poll while the previous one is still running', async () => {
     let release!: (value: boolean) => void;

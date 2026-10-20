@@ -1,9 +1,8 @@
 import { Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import { FailureAlert, withTimeout } from '@randan/tg-bot-kit';
 import { LoggerService, NotifyAdminService } from '@randan/tg-logger';
 import { TuyaContext } from '@tuya/tuya-connector-nodejs';
-
-import { FailureAlert } from './failure-alert.util';
 
 /** Response from tuya.device.detail() - Get Device Information API /v1.0/iot-03/devices/{id} */
 interface TuyaDeviceDetailResponse {
@@ -22,14 +21,6 @@ interface TuyaDeviceDetailResponse {
  * would hang the poll forever and stop the power tracking until a restart.
  */
 const REQUEST_TIMEOUT_MS = 20_000;
-
-function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
-  let timer: NodeJS.Timeout | undefined;
-  const timeout = new Promise<never>((_, reject) => {
-    timer = setTimeout(() => reject(new Error(`no answer in ${ms / 1000}s`)), ms);
-  });
-  return Promise.race([promise, timeout]).finally(() => clearTimeout(timer));
-}
 
 @Injectable()
 export class LightTuyaService {

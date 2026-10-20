@@ -6,6 +6,8 @@ describe('LightStatusService', () => {
   let chatIds: number[];
   let history: { timestamp: Date; status: boolean }[];
   let sendMessage: jest.Mock;
+  let registry: { addHealthCheck: jest.Mock };
+  let readyState: number;
   let service: LightStatusService;
 
   beforeEach(() => {
@@ -27,7 +29,14 @@ describe('LightStatusService', () => {
         return exec({ modifiedCount: chatIds.length !== before ? 1 : 0, upsertedCount: 0 });
       },
     };
+    readyState = 1;
+    registry = { addHealthCheck: jest.fn() };
     const historyModel = {
+      db: {
+        get readyState() {
+          return readyState;
+        },
+      },
       findOne: () => ({ sort: () => exec(history[history.length - 1] ?? null) }),
       create: async (doc: { timestamp: Date; status: boolean }) => history.push(doc),
     };
@@ -36,8 +45,18 @@ describe('LightStatusService', () => {
       { telegram: { sendMessage } } as never,
       subscriptionModel as never,
       historyModel as never,
+      registry as never,
       { log: jest.fn(), error: jest.fn() } as never,
     );
+  });
+
+  it('reports the database connection to /health', () => {
+    service.onModuleInit();
+    const [name, check] = registry.addHealthCheck.mock.calls[0];
+    expect(name).toBe('MongoDB');
+    expect(check()).toEqual({ ok: true, details: 'readyState 1' });
+    readyState = 0;
+    expect(check()).toEqual({ ok: false, details: 'readyState 0' });
   });
 
   describe('applyStatusChange', () => {
