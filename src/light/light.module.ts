@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { MongooseModule } from '@nestjs/mongoose';
 
+import { BotCommandsService } from './bot-commands.service';
 import { LightHandler } from './light.handler';
 import { LightCronService } from './light-cron.service';
 import { LightScheduleService } from './light-schedule.service';
@@ -56,6 +57,7 @@ import { YasnoService } from './yasno.service';
     YasnoService,
     LightScheduleService,
     LightHandler,
+    BotCommandsService,
   ],
   exports: [LightCronService],
 })

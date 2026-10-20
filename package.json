@@ -73,6 +73,7 @@
         "functions": 90,
         "statements": 90
       }
-    }
+    },
+    "coverageDirectory": "../coverage"
   }
 }

@@ -1,3 +1,4 @@
+import { BOT_COMMANDS } from './bot-commands.service';
 import { LightHandler } from './light.handler';
 
 const ADMIN = 100;
@@ -90,6 +91,13 @@ describe('LightHandler', () => {
       expect(text(c)).not.toContain('/statusrequest');
       expect(text(c)).not.toContain('/diag');
       expect(c.sent[0].extra).toEqual({ parse_mode: 'Markdown' });
+    });
+
+    it('mentions every command of the Telegram menu', async () => {
+      const c = ctx();
+      await handler.help(c as never);
+      BOT_COMMANDS.forEach(({ command }) => expect(text(c)).toContain(`/${command} `));
+      expect(text(c)).toContain('/stop - відписатися від сповіщень');
     });
 
     it('ignores an update without a chat', async () => {
